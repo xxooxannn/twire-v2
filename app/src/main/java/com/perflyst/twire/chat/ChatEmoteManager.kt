@@ -214,9 +214,16 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
         for (i in 0..<files.length()) {
             val file = files.getJSONObject(i)
             val name = file.getString("name")
-            if (!name.endsWith(".webp")) continue
-
-            val size = name.take(1).toInt()
+            // 7TV serves webp (animated + static), avif and gif.
+            // Prefer webp, fall back to anything with a leading size like "2x.avif".
+            // Frosty parity: we need the name so tapping chat shows the keyword.
+            val size = name.take(1).toIntOrNull() ?: continue
+            if (size !in 1..4) continue
+            val isAnimatedFormat = name.endsWith(".webp") || name.endsWith(".gif")
+            val isStaticFallback = name.endsWith(".avif") || name.endsWith(".png")
+            if (!isAnimatedFormat && !isStaticFallback) continue
+            // Don't overwrite a webp/gif with an avif fallback for the same size
+            if (urlMap.containsKey(size) && isStaticFallback) continue
             urlMap[size] = baseUrl + name
         }
 

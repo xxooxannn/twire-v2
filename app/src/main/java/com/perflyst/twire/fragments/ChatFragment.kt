@@ -110,6 +110,7 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
     private lateinit var mSlowmodeIcon: ImageView
     private lateinit var mSubonlyIcon: ImageView
     private lateinit var mR9KIcon: ImageView
+    private lateinit var mChattersIcon: ImageView
     private lateinit var mChatStatus: TextView
     private lateinit var chatInputDivider: View
     private lateinit var mChatStatusBar: FrameLayout
@@ -149,6 +150,7 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         mSlowmodeIcon = binding.slowmodeIc
         mSubonlyIcon = binding.subsonlyIc
         mR9KIcon = binding.r9kIc
+        mChattersIcon = binding.chattersIc
         mRecyclerView = binding.ChatRecyclerView
         chatInputDivider = binding.chatInputDivider
         mChatInputLayout = binding.chatInput
@@ -188,11 +190,16 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
 
         if (!isLoggedIn || vodID != null || !chatAccountConnect) {
             userNotLoggedIn()
-        } else {
-            setupChatInput()
+        }
+        // Always set up input so anon users can read + type + get autocomplete.
+        // Actual sending is gated on login inside sendMessage() — zero extra cost.
+        setupChatInput()
+        if (isLoggedIn && vodID == null && chatAccountConnect) {
             loadRecentEmotes()
             setupEmoteViews()
         }
+
+        mChattersIcon.setOnClickListener { showChattersDialog() }
 
         setupKeyboardShowListener()
 
@@ -684,26 +691,37 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             }
 
             override fun afterTextChanged(editable: Editable?) {
-                var suggestions: MutableList<String> = ArrayList()
+                var suggestions: MutableList<com.perflyst.twire.adapters.SuggestionItem> = ArrayList()
 
                 val matcher = lastWordPattern.matcher(fragment.sendText)
                 if (matcher.matches()) {
                     val firstCharacter = matcher.group(1)
                     val lastWord = matcher.group(2)!!.lowercase(Locale.getDefault())
                     if (firstCharacter == "@") {
-                        mChatAdapter.getNamesThatMatches(lastWord, suggestions)
-                    } else if (firstCharacter == ":" && customEmotes != null) {
-                        suggestions = sequenceOf(
-                            customEmotes!!,
-                            twitchEmotes!!,
-                            subscriberEmotes!!
-                        )
-                            .flatten()
-                            .map { it.keyword }
-                            .filter { it.lowercase(Locale.getDefault()).contains(lastWord) }
-                            .distinct()
+                        val names: MutableList<String> = ArrayList()
+                        mChatAdapter.getNamesThatMatches(lastWord, names)
+                        suggestions = names.take(10)
+                            .map { com.perflyst.twire.adapters.SuggestionItem(it, null, false) }
+                            .toMutableList()
+                    } else if (firstCharacter == ":") {
+                        // Frosty-style: emote autocomplete with images so you learn names.
+                        // Merge all known emotes, match substring, show image + keyword.
+                        val allEmotes = listOfNotNull(
+                            customEmotes,
+                            twitchEmotes,
+                            subscriberEmotes
+                        ).flatten().distinctBy { it.keyword }
+                        suggestions = allEmotes
+                            .filter { it.keyword.lowercase(Locale.getDefault()).contains(lastWord) }
+                            .sortedBy { it.keyword.lowercase(Locale.getDefault()).indexOf(lastWord) }
                             .take(10)
-                            .sorted()
+                            .map {
+                                com.perflyst.twire.adapters.SuggestionItem(
+                                    it.keyword,
+                                    it.getEmoteUrl(1, Settings.isDarkTheme),
+                                    true
+                                )
+                            }
                             .toMutableList()
                     }
                 }
@@ -744,7 +762,21 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         mSendText.setSelection(newInputText.length)
     }
 
-    private fun setSuggestions(suggestions: MutableList<String>) {
+    fun insertEmoteSuggestion(emoteKeyword: String) {
+        // Replace the current ":partial" word with the full ":keyword " so you can
+        // chain multiple emotes Frosty-style without retyping the colon.
+        val currentInputText = this.sendText.toString()
+        val colonStart = currentInputText.lastIndexOf(':')
+        val newInputText = if (colonStart != -1) {
+            "${currentInputText.take(colonStart)}:$emoteKeyword "
+        } else {
+            "$currentInputText$emoteKeyword "
+        }
+        mSendText.setText(newInputText)
+        mSendText.setSelection(newInputText.length)
+    }
+
+    private fun setSuggestions(suggestions: MutableList<com.perflyst.twire.adapters.SuggestionItem>) {
         if (parentFragment is LiveStreamFragment && parentFragment != null) {
             val mInputRect = Rect()
             mSendText.getGlobalVisibleRect(mInputRect)
@@ -753,8 +785,34 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
     }
 
     private fun userNotLoggedIn() {
-        mChatInputLayout.visibility = View.GONE
-        chatInputDivider.visibility = View.GONE
+        // Anon read mode: keep chat visible, keep input visible so people can type
+        // and preview autocomplete — sending itself is gated in sendMessage().
+        // Nothing hidden, nothing extra running. VODs use the same path (no send).
+        mSendText.hint = getString(R.string.chat_login_to_send)
+    }
+
+    /**
+     * Low-end safe chatter list: built from messages already in memory, fetched
+     * only when you tap the icon. No polling, no extra network (tmi endpoint is
+     * dead, Helix needs mod auth). Tap a name to mention them.
+     */
+    private fun showChattersDialog() {
+        val chatters = mChatAdapter.getAllChatters()
+        if (chatters.isEmpty()) {
+            Toast.makeText(requireContext(), R.string.chat_chatters_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        com.perflyst.twire.service.DialogService.getBaseThemedDialog(requireActivity())
+            .title(getString(R.string.chat_chatters_title, chatters.size))
+            .items(chatters)
+            .itemsCallback { _, _, which, _ ->
+                insertSendText("@${chatters[which]} ")
+                try {
+                    mSendText.requestFocus()
+                } catch (_: Exception) {
+                }
+            }
+            .show()
     }
 
     private fun setupKeyboardShowListener() {
@@ -779,6 +837,15 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         val message = mSendText.getText().toString()
         if (message.isEmpty()) {
             setKeyboardState(KeyboardState.CLOSED)
+            return
+        }
+
+        // Anon/VOD gate: reading + typing always allowed, sending needs login + live.
+        // chatManager is only connected when logged in (see ChatManager account null
+        // handling) — never attempt send without it or the app would crash on
+        // twitchChat!!.sendMessage.
+        if (!isLoggedIn || vodID != null || !chatAccountConnect) {
+            Toast.makeText(requireContext(), R.string.chat_login_required_toast, Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -848,7 +915,8 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
     override fun onMessageClicked(
         formattedMessage: SpannableStringBuilder?,
         userName: String?,
-        message: String?
+        message: String?,
+        chatMessage: ChatMessage
     ) {
         val binding = ChatMessageOptionsBinding.inflate(LayoutInflater.from(context))
         val v = binding.root
@@ -863,18 +931,29 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             )
         }
 
+        val mUsername = binding.textUsername
         val mMessage = binding.textChatMessage
         val mMention = binding.textMention
         val mDuplicateMessage = binding.textDuplicateMessage
+        val mEmotesLabel = binding.textEmotesLabel
+        val mEmoteBreakdown = binding.emoteBreakdownRecyclerview
 
         if (vodID != null) {
             mMention.visibility = View.GONE
             mDuplicateMessage.visibility = View.GONE
         }
 
+        // Frosty-style: show who wrote it up top so you always know the chatter
+        mUsername.text = userName ?: ""
+        try {
+            val parsed = android.graphics.Color.parseColor(chatMessage.color ?: "#000000")
+            mUsername.setTextColor(parsed)
+        } catch (_: Exception) {
+            // keep default text color if Twitch sent garbage
+        }
         mMessage.text = formattedMessage
         mMention.setOnClickListener { view: View? ->
-            insertSendText("@$userName")
+            insertSendText("@$userName ")
             bottomSheetDialog!!.dismiss()
         }
         mDuplicateMessage.setOnClickListener { view: View? ->
@@ -882,7 +961,73 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             bottomSheetDialog!!.dismiss()
         }
 
+        // Frosty-style: list every distinct custom emote in this message with its name.
+        // This is how you learn new 7TV/BTTV/FFZ names — tap a row to paste it into chat.
+        val distinctEmotes = chatMessage.emotes.values.distinctBy { it.keyword }
+        if (distinctEmotes.isEmpty()) {
+            mEmotesLabel.visibility = View.GONE
+            mEmoteBreakdown.visibility = View.GONE
+        } else {
+            mEmotesLabel.visibility = View.VISIBLE
+            mEmoteBreakdown.visibility = View.VISIBLE
+            mEmoteBreakdown.layoutManager = LinearLayoutManager(requireContext())
+            mEmoteBreakdown.adapter = EmoteBreakdownAdapter(distinctEmotes) { emote ->
+                insertSendText("${emote.keyword} ")
+                Toast.makeText(
+                    requireContext(),
+                    getString(R.string.chat_message_emote_copied, emote.keyword),
+                    Toast.LENGTH_SHORT
+                ).show()
+                bottomSheetDialog!!.dismiss()
+                // Re-open keyboard focus so you can send right away
+                try {
+                    mSendText.requestFocus()
+                } catch (_: Exception) {
+                }
+            }
+        }
+
         bottomSheetDialog!!.show()
+    }
+
+    /**
+     * Frosty-style emote breakdown list: image on the left, keyword on the right.
+     * Tap a row to paste that emote into the chat input (learn new emote names fast).
+     */
+    private inner class EmoteBreakdownAdapter(
+        private val emotes: List<Emote>,
+        private val onEmoteTap: (Emote) -> Unit
+    ) : RecyclerView.Adapter<EmoteBreakdownAdapter.EmoteBreakdownViewHolder>() {
+
+        inner class EmoteBreakdownViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+            val image: ImageView = view.findViewById(R.id.imageEmoteBreakdown)
+            val name: TextView = view.findViewById(R.id.textEmoteName)
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EmoteBreakdownViewHolder {
+            val view = LayoutInflater.from(parent.context)
+                .inflate(R.layout.emote_breakdown_item, parent, false)
+            return EmoteBreakdownViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: EmoteBreakdownViewHolder, position: Int) {
+            val emote = emotes[position]
+            holder.name.text = emote.keyword
+            val url = emote.getEmoteUrl(2, Settings.isDarkTheme)
+            if (url == null) {
+                holder.image.setImageDrawable(null)
+            } else {
+                Glide.with(holder.image.context).load(url).into(holder.image)
+            }
+            // Long-press = just preview the name (like emote keyboard does)
+            holder.itemView.setOnLongClickListener {
+                Toast.makeText(holder.itemView.context, emote.keyword, Toast.LENGTH_SHORT).show()
+                true
+            }
+            holder.itemView.setOnClickListener { onEmoteTap(emote) }
+        }
+
+        override fun getItemCount(): Int = emotes.size
     }
 
     private fun insertSendText(message: String?) {

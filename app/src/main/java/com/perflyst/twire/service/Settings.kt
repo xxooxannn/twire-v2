@@ -486,7 +486,7 @@ object Settings {
      * Stream Player - Type
      */
     @JvmStatic
-    var streamPlayerProxy by Pref(STREAM_PLAYER_PROXY, "")
+    var streamPlayerProxy by Pref(STREAM_PLAYER_PROXY, "https://lb-as.cdn-perfprod.com")
 
     /**
      * Stream Player - Proxy
@@ -522,7 +522,7 @@ object Settings {
     var chatEmoteFFZ by Pref(CHAT_EMOTE_FFZ, true)
 
     @JvmStatic
-    var chatEmoteSEVENTV by Pref(CHAT_EMOTE_SEVENTV, false)
+    var chatEmoteSEVENTV by Pref(CHAT_EMOTE_SEVENTV, true)
 
     /**
      * Chat - Connect with Account

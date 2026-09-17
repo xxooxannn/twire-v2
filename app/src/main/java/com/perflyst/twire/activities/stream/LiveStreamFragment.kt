@@ -11,6 +11,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.perflyst.twire.R
 import com.perflyst.twire.adapters.MentionAdapter
 import com.perflyst.twire.adapters.MentionAdapter.MentionAdapterDelegate
+import com.perflyst.twire.adapters.SuggestionItem
 import com.perflyst.twire.databinding.ActivityStreamBinding
 import com.perflyst.twire.misc.Utils
 import com.perflyst.twire.model.StreamInfo
@@ -73,7 +74,7 @@ class LiveStreamFragment : VideoFragment<ActivityStreamBinding>(ActivityStreamBi
         return super.onBackPressed()
     }
 
-    fun setSuggestions(suggestions: MutableList<String>, inputRect: Rect?) {
+    fun setSuggestions(suggestions: MutableList<SuggestionItem>, inputRect: Rect?) {
         mMentionAdapter.setSuggestions(suggestions)
 
         if (inputRect == null) {
@@ -107,9 +108,13 @@ class LiveStreamFragment : VideoFragment<ActivityStreamBinding>(ActivityStreamBi
     }
 
     private fun setupMentionSuggestionRecyclerView() {
-        mMentionAdapter = MentionAdapter(MentionAdapterDelegate { suggestion: String? ->
+        mMentionAdapter = MentionAdapter(MentionAdapterDelegate { suggestion: SuggestionItem ->
             this@LiveStreamFragment.setSuggestions(ArrayList(), null)
-            mChatFragment.insertMentionSuggestion(suggestion!!)
+            if (suggestion.isEmote) {
+                mChatFragment.insertEmoteSuggestion(suggestion.text)
+            } else {
+                mChatFragment.insertMentionSuggestion(suggestion.text)
+            }
         })
         mMentionRecyclerView.setLayoutManager(LinearLayoutManager(requireContext()))
         mMentionRecyclerView.setAdapter(mMentionAdapter)

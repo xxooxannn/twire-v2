@@ -14,11 +14,11 @@ android {
     ndkVersion = "25.0.8775105"
 
     defaultConfig {
-        applicationId = "com.perflyst.twire"
+        applicationId = "com.chautari.app"
         minSdk = 21
         targetSdk = 35
         versionCode = 538
-        versionName = "2.12.3"
+        versionName = "1.0.0"
 
         vectorDrawables.useSupportLibrary = true
 
@@ -34,19 +34,19 @@ android {
                     "proguard-rules.pro"
                 )
             )
-            resValue("string", "app_name", "Twire")
+            resValue("string", "app_name", "Chautari")
             signingConfig = signingConfigs.getByName("debug")
         }
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-DEBUG"
-            resValue("string", "app_name", "Twire Debug")
+            resValue("string", "app_name", "Chautari Debug")
         }
     }
 
     applicationVariants.all {
         outputs.all {
-            (this as BaseVariantOutputImpl).outputFileName = "Twire-${versionName}.apk"
+            (this as BaseVariantOutputImpl).outputFileName = "Chautari-${versionName}.apk"
         }
     }
 
@@ -123,7 +123,10 @@ dependencies {
     implementation("com.github.afollestad.material-dialogs:commons:0.8.6.2@aar")
 
     //https://github.com/google/ExoPlayer/blob/release-v2/RELEASENOTES.md
-    val media3 = "1.3.0"
+    // 1.4.1: conservative bump from 1.3.0 — HLS + buffering fixes, same public API.
+    // Jumping straight to 1.10.x risks breaking PlayerFragment/MediaController calls
+    // with no local SDK to verify. Let CI prove this green first, then go further.
+    val media3 = "1.4.1"
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-exoplayer-hls:$media3")
     implementation("androidx.media3:media3-ui:$media3")

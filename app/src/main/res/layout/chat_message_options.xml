@@ -15,12 +15,35 @@
             android:paddingTop="8dp">
 
             <TextView
+                android:id="@+id/text_username"
+                style="@style/stream_settings_item"
+                android:layout_height="wrap_content"
+                android:textStyle="bold"
+                android:textSize="16sp" />
+
+            <TextView
                 android:id="@+id/text_chat_message"
                 style="@style/stream_settings_item"
                 android:layout_height="wrap_content"
                 android:background="?attr/selectableItemBackground"
                 android:minHeight="48dp"
                 android:textIsSelectable="true" />
+
+            <TextView
+                android:id="@+id/text_emotes_label"
+                style="@style/stream_settings_item"
+                android:layout_height="wrap_content"
+                android:text="@string/chat_message_option_emotes"
+                android:textSize="13sp"
+                android:paddingBottom="0dp" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/emote_breakdown_recyclerview"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingLeft="16dp"
+                android:paddingRight="16dp"
+                android:paddingBottom="8dp" />
 
             <TextView
                 android:id="@+id/text_mention"

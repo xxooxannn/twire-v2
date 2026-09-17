@@ -154,7 +154,8 @@ class ChatAdapter(
                 mCallback.onMessageClicked(
                     builder,
                     message.name,
-                    message.message
+                    message.message,
+                    message
                 )
             }
         } catch (e: Exception) {
@@ -174,6 +175,15 @@ class ChatAdapter(
         }
 
         suggestions.sort()
+    }
+
+    /**
+     * Low-end safe chatter list: names collected from messages already in memory.
+     * Zero extra network/battery — the old tmi.twitch.tv chatters endpoint is dead
+     * anyway (GetStreamChattersTask returns null), and Helix needs mod auth.
+     */
+    fun getAllChatters(): List<String> {
+        return messages.map { it.name }.distinct().sorted()
     }
 
     private fun checkForLink(message: String, spanBuilder: SpannableStringBuilder) {
@@ -309,7 +319,8 @@ class ChatAdapter(
         fun onMessageClicked(
             formattedString: SpannableStringBuilder?,
             userName: String?,
-            message: String?
+            message: String?,
+            chatMessage: ChatMessage
         )
     }
 

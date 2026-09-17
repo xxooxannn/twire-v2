@@ -160,6 +160,15 @@
             android:layout_gravity="end">
 
             <ImageView
+                android:id="@+id/chatters_ic"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:paddingLeft="8dp"
+                android:paddingRight="8dp"
+                android:src="@drawable/ic_group"
+                app:tint="?attr/chatRoomstateIconColor" />
+
+            <ImageView
                 android:id="@+id/subsonly_ic"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"

@@ -8,12 +8,21 @@
     android:clickable="true"
     android:focusable="true">
 
+    <ImageView
+        android:id="@+id/imageSuggestion"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_alignParentLeft="true"
+        android:layout_centerVertical="true"
+        android:layout_marginLeft="@dimen/chat_recyclerview_padding" />
+
     <TextView
         android:id="@+id/txtSuggestion"
         android:layout_width="match_parent"
         android:layout_height="36dp"
+        android:layout_toRightOf="@id/imageSuggestion"
         android:gravity="center_vertical"
-        android:paddingLeft="@dimen/chat_recyclerview_padding"
+        android:paddingLeft="12dp"
         android:paddingRight="@dimen/chat_recyclerview_padding"
         android:textColor="?attr/textColor"
         android:textSize="@dimen/chat_message_mention" />

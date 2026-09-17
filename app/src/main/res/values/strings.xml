@@ -164,17 +164,17 @@
     <string name="intent_key_stream_start_time" translatable="false">StreamStartTime</string>
 
     <!-- Welcome Activity -->
-    <string name="title_activity_welcome">Twire setup</string>
+    <string name="title_activity_welcome">Chautari setup</string>
     <string name="welcome_text_line_one">Welcome to</string>
-    <string name="welcome_text_line_two">Twire</string>
+    <string name="welcome_text_line_two">Chautari</string>
 
     <!-- Login Activity-->
     <string name="title_activity_login" translatable="false">@string/title_activity_welcome</string>
     <string name="login_text_line_one">Let\'s get you set up!</string>
     <string name="login_text_line_two">First, sign into Twitch.</string>
-    <string name="login_user_cancel">You need to log in to use Twire, though…</string>
+    <string name="login_user_cancel">You need to log in to use Chautari, though…</string>
     <string name="login_user_cancel_action">GOT IT</string>
-    <string name="login_user_no_internet">You\'ll need an internet connection to set up Twire.</string>
+    <string name="login_user_no_internet">You\'ll need an internet connection to set up Chautari.</string>
     <string name="login_user_no_internet_action">TRY AGAIN</string>
     <string name="login_on_success_message">Hello, %s</string>
     <string name="login_intent_part_of_setup" translatable="false">login_intent_part_of_setup</string>
@@ -219,7 +219,7 @@
     <string name="gen_dialog_import_follows_content">Do you want to import all follows?</string>
     <string name="gen_dialog_import_follows_action">Import</string>
     <string name="gen_local_follows_header">Local follows</string>
-    <string name="gen_local_follows_summary">Users followed in Twire are stored locally and not sent to Twitch.</string>
+    <string name="gen_local_follows_summary">Users followed in Chautari are stored locally and not sent to Twitch.</string>
     <string name="gen_twitch_follows">Wipe all follows</string>
     <string name="gen_wipe_summary">This will not wipe follows on Twitch.</string>
     <string name="gen_export_database">Export all follows</string>
@@ -307,10 +307,17 @@
     <string name="chat_message_option_mention">Mention</string>
     <string name="chat_message_option_duplicate">Duplicate message</string>
     <string name="chat_message_option_block">Block</string>
+    <string name="chat_message_option_emotes">Emotes in this message — tap to use</string>
+    <string name="chat_message_option_no_emotes">No custom emotes in this message</string>
+    <string name="chat_message_emote_copied">Emote %1$s added to input</string>
+    <string name="chat_chatters_title">Chatters (%1$d)</string>
+    <string name="chat_chatters_empty">No chatters seen yet — they appear as people talk</string>
+    <string name="chat_login_to_send">Log in to send messages</string>
+    <string name="chat_login_required_toast">Log in from Settings to chat</string>
     <string name="stream_external_play_using">Play using…</string>
 
     <!-- Router -->
-    <string name="router_activity_label">Play with Twire</string>
+    <string name="router_activity_label">Play with Chautari</string>
     <string name="router_unknown_error">An unknown error occurred.</string>
     <string name="router_error_dialog_title">URL Error</string>
     <string name="router_vod_error">Failed to load the VOD.</string>
