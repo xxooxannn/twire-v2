@@ -129,7 +129,7 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
     private var selectedTabColorRes: Int? = null
     private var unselectedTabColorRes: Int? = null
     private var keyboardState: KeyboardState? = KeyboardState.CLOSED
-    private lateinit var defaultBackgroundColor: ColorFilter
+    private var defaultBackgroundColor: ColorFilter? = null
     private var bottomSheetDialog: BottomSheetDialog? = null
 
     private enum class KeyboardState {
@@ -664,6 +664,12 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         mChatInputLayout.bringToFront()
         chatInputDivider.bringToFront()
         mSendText.bringToFront()
+
+        // Self-heal: capture the untinted icon color here too, so the tint
+        // watcher below can never crash even if init order ever shifts
+        // (e.g. OEM IME replaying key events during view attach on Android 16).
+        // Null = no tint, which setColorFilter(null) handles by clearing.
+        if (defaultBackgroundColor == null) defaultBackgroundColor = mSendButton.colorFilter
 
         mSendButton.setOnClickListener { v: View? -> sendMessage() }
         mSendText.setOnEditTextImeBackListener { ctrl: EditTextBackEvent?, text: String? ->

@@ -505,7 +505,18 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
      * @param message The message that will be sent
      */
     fun sendMessage(message: String?) {
-        twitchChat!!.sendMessage(channel.login, message)
+        // Never crash a send: stock Twire NPE'd here on flaky connections
+        // (seen in the wild on Android 16). Worst case the message is dropped.
+        val chat = twitchChat
+        if (chat == null) {
+            Timber.w("sendMessage with no connection, dropping message")
+            return
+        }
+        try {
+            chat.sendMessage(channel.login, message)
+        } catch (e: Exception) {
+            Timber.e(e, "sendMessage failed")
+        }
     }
 
     private fun readBadges(request: HystrixCommand<ChatBadgeSetList>): MutableMap<String, MutableMap<String, Badge>> {
