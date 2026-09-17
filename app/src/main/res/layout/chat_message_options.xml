@@ -46,6 +46,19 @@
                 android:paddingBottom="8dp" />
 
             <TextView
+                android:id="@+id/text_recent_label"
+                style="@style/stream_settings_item"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:paddingBottom="0dp" />
+
+            <TextView
+                android:id="@+id/text_recent_messages"
+                style="@style/stream_settings_item"
+                android:layout_height="wrap_content"
+                android:textSize="14sp" />
+
+            <TextView
                 android:id="@+id/text_mention"
                 style="@style/stream_settings_item"
                 android:background="?attr/selectableItemBackground"

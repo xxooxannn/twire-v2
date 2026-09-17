@@ -138,10 +138,86 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
         readFFZBadges()
 
         if (vodId == null) {
+            // Frosty parity: backfill recent chat so the screen isn't empty on join.
+            // One HTTP call, last 50 messages only (low-end safe), best-effort —
+            // any failure silently falls through to live-only chat.
+            loadRecentHistory()
             connect()
         } else {
             processVodChat()
         }
+    }
+
+    /**
+     * Pulls recent messages from robotty's public archive (same source Frosty uses
+     * for "show recent messages") and feeds them through the normal pipeline.
+     * Raw IRC lines carry all tags (badges/color/emotes), so history renders
+     * identically to live messages.
+     */
+    private fun loadRecentHistory() {
+        try {
+            val json = Service.urlToJSONString(
+                "https://recent-messages.robotty.de/api/v2/recent-messages/${channel.login}"
+            )
+            if (json.isEmpty()) return
+            val messages = JSONObject(json).optJSONArray("messages") ?: return
+            val start = if (messages.length() > 50) messages.length() - 50 else 0
+            for (i in start..<messages.length()) {
+                parseHistoryLine(messages.optString(i))?.let { onMessage(it) }
+            }
+        } catch (e: Exception) {
+            Timber.d(e, "Recent history unavailable, live-only chat")
+        }
+    }
+
+    private fun parseHistoryLine(line: String?): ChatMessage? {
+        if (line.isNullOrEmpty() || !line.contains("PRIVMSG #")) return null
+        try {
+            // @tags :nick!user@host PRIVMSG #chan :message text
+            val tagsEnd = line.indexOf(" :")
+            if (!line.startsWith("@") || tagsEnd == -1) return null
+            val tags = line.substring(1, tagsEnd).split(";")
+                .mapNotNull {
+                    val eq = it.indexOf("=")
+                    if (eq == -1) null else it.substring(0, eq) to unescapeTag(it.substring(eq + 1))
+                }.toMap()
+
+            val rest = line.substring(tagsEnd + 2)
+            val privmsgIndex = rest.indexOf("PRIVMSG #")
+            if (privmsgIndex == -1) return null
+            val afterChannel = rest.substring(privmsgIndex)
+            val msgStart = afterChannel.indexOf(" :")
+            if (msgStart == -1) return null
+            val body = afterChannel.substring(msgStart + 2)
+            if (body.isEmpty()) return null
+
+            val prefix = rest.substring(0, privmsgIndex).trim().removePrefix(":")
+            val nick = prefix.substringBefore("!").lowercase()
+            if (nick.isEmpty()) return null
+
+            val displayName = tags["display-name"]?.ifEmpty { null } ?: nick
+            val color = tags["color"]?.ifEmpty { null } ?: randomColor(nick)
+
+            val badges = mutableMapOf<String, String>()
+            tags["badges"]?.split(",")?.forEach {
+                val slash = it.indexOf("/")
+                if (slash != -1) badges[it.substring(0, slash)] = it.substring(slash + 1)
+            }
+
+            val emotes = mEmoteManager.findTwitchEmotes(tags["emotes"].orEmpty(), body)
+            emotes.putAll(mEmoteManager.findCustomEmotes(body))
+
+            return ChatMessage(body, displayName, color, getBadges(badges), emotes, false)
+                .also { it.id = tags["id"] }
+        } catch (e: Exception) {
+            Timber.v(e, "Skipping malformed history line")
+            return null
+        }
+    }
+
+    private fun unescapeTag(value: String): String {
+        return value.replace("\\s", " ").replace("\\:", ";")
+            .replace("\\\\", "\\").replace("\\r", "\r").replace("\\n", "\n")
     }
 
     private fun onMessage(message: ChatMessage) {

@@ -56,12 +56,13 @@ class LiveStreamFragment : VideoFragment<ActivityStreamBinding>(ActivityStreamBi
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        if (savedInstanceState == null) {
-            mMentionContainer = binding.mentionContainer
-            mMentionContainer.visibility = View.GONE
-            mMentionRecyclerView = binding.mentionRecyclerview
-            setupMentionSuggestionRecyclerView()
-        }
+        // Always (re)bind — after rotation savedInstanceState != null but the
+        // view is fresh, and typing would otherwise crash on uninitialized
+        // mention views when ChatFragment pushes suggestions.
+        mMentionContainer = binding.mentionContainer
+        mMentionContainer.visibility = View.GONE
+        mMentionRecyclerView = binding.mentionRecyclerview
+        setupMentionSuggestionRecyclerView()
     }
 
     override fun onStop() {

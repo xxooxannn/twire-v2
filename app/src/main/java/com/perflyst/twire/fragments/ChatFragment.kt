@@ -848,6 +848,10 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             Toast.makeText(requireContext(), R.string.chat_login_required_toast, Toast.LENGTH_SHORT).show()
             return
         }
+        if (!this::chatManager.isInitialized) {
+            Timber.w("sendMessage tapped before chat connected, ignoring")
+            return
+        }
 
         mSendButton.performHapticFeedback(vibrationFeedback)
 
@@ -984,6 +988,20 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             }
         }
 
+        // Frosty-style user context: recent in-memory messages from this chatter
+        // (plain text, zero extra network — same philosophy as the chatter list).
+        val recent = mChatAdapter.getRecentMessagesByUser(userName ?: "", 5)
+            .filter { it.message != message }
+        if (recent.isEmpty()) {
+            binding.textRecentLabel.visibility = View.GONE
+            binding.textRecentMessages.visibility = View.GONE
+        } else {
+            binding.textRecentLabel.visibility = View.VISIBLE
+            binding.textRecentMessages.visibility = View.VISIBLE
+            binding.textRecentLabel.text = getString(R.string.chat_message_recent_from, userName)
+            binding.textRecentMessages.text = recent.joinToString("\n• ", "• ") { it.message }
+        }
+
         bottomSheetDialog!!.show()
     }
 
@@ -1009,7 +1027,8 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
      * Frosty-style emote breakdown list: image on the left, keyword on the right.
      * Tap a row to paste that emote into the chat input (learn new emote names fast).
      */
-    private inner class EmoteBreakdownAdapter(        private val emotes: List<Emote>,
+    private inner class EmoteBreakdownAdapter(
+        private val emotes: List<Emote>,
         private val onEmoteTap: (Emote) -> Unit
     ) : RecyclerView.Adapter<EmoteBreakdownAdapter.EmoteBreakdownViewHolder>() {
 

@@ -17,6 +17,10 @@ data class ChatMessage(
     @JvmField
     var systemMessage: String = ""
 
+    /** Frosty-style: timeouts/deletes fade the message instead of vanishing it. */
+    @JvmField
+    var deletionNotice: String? = null
+
     init {
         ChatManager.ffzBadgeMap?.let { ffzBadgeMap ->
             // Load any special FFZ badges the user has

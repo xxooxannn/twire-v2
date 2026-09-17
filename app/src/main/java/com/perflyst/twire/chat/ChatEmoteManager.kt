@@ -191,14 +191,24 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
     @Throws(JSONException::class)
     private fun ToFFZ(emoteObject: JSONObject): Emote {
         val EMOTE_NAME = "name"
-        val EMOTE_URLS = "urls"
 
-        val urls = emoteObject.getJSONObject(EMOTE_URLS)
+        // Frosty parity: prefer animated renditions (animated.4x > 2x > 1x),
+        // fall back to static urls (4x > 2x > 1x). Old code ignored "animated".
+        val animated = emoteObject.optJSONObject("animated")
+        val static = emoteObject.optJSONObject("urls")
         val urlMap = HashMap<Int, String>()
-        val iterator = urls.keys()
-        while (iterator.hasNext()) {
-            val key = iterator.next()
-            urlMap[key.toInt()] = urls.getString(key)
+        for (source in listOfNotNull(animated, static)) {
+            val iterator = source.keys()
+            while (iterator.hasNext()) {
+                val key = iterator.next()
+                val size = key.toIntOrNull() ?: continue
+                if (!urlMap.containsKey(size)) {
+                    var url = source.getString(key)
+                    if (url.startsWith("//")) url = "https:$url"
+                    urlMap[size] = url
+                }
+            }
+            if (urlMap.isNotEmpty() && source == animated) break
         }
 
         return Emote(emoteObject.getString(EMOTE_NAME), urlMap)

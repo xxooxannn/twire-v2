@@ -149,6 +149,13 @@ class ChatAdapter(
 
             holder.message.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSize)
             holder.message.text = builder
+            // Recycled views must reset alpha every bind.
+            if (message.deletionNotice != null) {
+                holder.message.alpha = 0.5f
+                holder.message.append("\n(${message.deletionNotice})")
+            } else {
+                holder.message.alpha = 1.0f
+            }
             holder.message.movementMethod = LinkMovementMethod.getInstance()
             holder.message.setOnClickListener { view: View? ->
                 mCallback.onMessageClicked(
@@ -184,6 +191,11 @@ class ChatAdapter(
      */
     fun getAllChatters(): List<String> {
         return messages.map { it.name }.distinct().sorted()
+    }
+
+    /** Recent in-memory messages from one user, newest last (for the tap sheet). */
+    fun getRecentMessagesByUser(name: String, limit: Int): List<ChatMessage> {
+        return messages.filter { it.name == name && it.deletionNotice == null }.takeLast(limit)
     }
 
     private fun checkForLink(message: String, spanBuilder: SpannableStringBuilder) {
@@ -289,14 +301,16 @@ class ChatAdapter(
     }
 
     fun clear(target: String?) {
+        // Frosty-style: fade + label instead of yanking the message away,
+        // so timeouts/deletes are visible in context. Tap still opens details.
         for (i in messages.indices.reversed()) {
             val message = messages[i]
             if (message.id != target) {
                 continue
             }
 
-            messages.removeAt(i)
-            notifyItemRemoved(i)
+            message.deletionNotice = context.getString(R.string.chat_message_deleted)
+            notifyItemChanged(i)
         }
     }
 

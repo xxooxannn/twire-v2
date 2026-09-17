@@ -310,6 +310,8 @@
     <string name="chat_message_option_emotes">Emotes in this message — tap to use</string>
     <string name="chat_message_option_no_emotes">No custom emotes in this message</string>
     <string name="chat_message_emote_copied">Emote %1$s added to input</string>
+    <string name="chat_message_deleted">message deleted</string>
+    <string name="chat_message_recent_from">Recent from %1$s</string>
     <string name="chat_chatters_title">Chatters (%1$d)</string>
     <string name="chat_chatters_empty">No chatters seen yet — they appear as people talk</string>
     <string name="chat_login_to_send">Log in to send messages</string>
