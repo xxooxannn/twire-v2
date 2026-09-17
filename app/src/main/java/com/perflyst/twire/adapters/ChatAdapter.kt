@@ -287,8 +287,9 @@ class ChatAdapter(
         messages.add(message)
 
         notifyItemInserted(messages.size - 1)
-        if (!mRecyclerView.isScrolled) {
-            checkSize()
+        // Always trim (low-end memory) — auto-scroll only unless paused.
+        checkSize()
+        if (!mRecyclerView.isUserPaused) {
             mRecyclerView.scrollToPosition(messages.size - 1)
         }
         Timber.v("Adding Message %s", message.message)

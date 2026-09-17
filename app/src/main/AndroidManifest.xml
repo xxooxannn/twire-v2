@@ -61,7 +61,8 @@
             android:name=".activities.StartUpActivity"
             android:exported="true"
             android:theme="@style/StartUpTheme"
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden"
             android:supportsPictureInPicture="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -36,6 +36,10 @@ class ChatRecyclerView : RecyclerView {
     val isScrolled: Boolean
         get() = amountScrolled > 1 && adapter!!.itemCount > 0
 
+    /** True only when the user deliberately scrolled up (banner showing). */
+    val isUserPaused: Boolean
+        get() = lastScrolled
+
     fun setChatPaused(chatPaused: TextView) {
         this.chatPaused = chatPaused
         chatPaused.setOnClickListener { v: View? ->
@@ -64,7 +68,15 @@ class ChatRecyclerView : RecyclerView {
 
                 if (chatPaused == null) return
 
-                val scrolled: Boolean = chatRecyclerView.isScrolled
+                // Reaching the bottom always resumes — even from layout passes.
+                // Only real user scrolls (drag/fling) may pause: animated emote
+                // re-layouts fire onScrolled while IDLE and used to pause chat
+                // from a mere touch or entirely by themselves.
+                val scrolled: Boolean = if (amountScrolled <= 1) {
+                    false
+                } else {
+                    lastScrolled || chatRecyclerView.scrollState != SCROLL_STATE_IDLE
+                }
                 if (scrolled != lastScrolled) {
                     chatPaused!!.animate().alpha((if (scrolled) 1 else 0).toFloat()).start()
                     lastScrolled = scrolled
