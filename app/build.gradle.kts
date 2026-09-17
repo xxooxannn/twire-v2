@@ -14,11 +14,11 @@ android {
     ndkVersion = "25.0.8775105"
 
     defaultConfig {
-        applicationId = "com.chautari.app"
+        applicationId = "com.perflyst.twire.v2"
         minSdk = 21
         targetSdk = 35
         versionCode = 538
-        versionName = "1.0.0"
+        versionName = "2.0.0"
 
         vectorDrawables.useSupportLibrary = true
 
@@ -34,19 +34,19 @@ android {
                     "proguard-rules.pro"
                 )
             )
-            resValue("string", "app_name", "Chautari")
+            resValue("string", "app_name", "Twire V2")
             signingConfig = signingConfigs.getByName("debug")
         }
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-DEBUG"
-            resValue("string", "app_name", "Chautari Debug")
+            resValue("string", "app_name", "Twire V2 Debug")
         }
     }
 
     applicationVariants.all {
         outputs.all {
-            (this as BaseVariantOutputImpl).outputFileName = "Chautari-${versionName}.apk"
+            (this as BaseVariantOutputImpl).outputFileName = "TwireV2-${versionName}.apk"
         }
     }
 

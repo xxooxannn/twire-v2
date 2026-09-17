@@ -943,14 +943,11 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             mDuplicateMessage.visibility = View.GONE
         }
 
-        // Frosty-style: show who wrote it up top so you always know the chatter
+        // Frosty-style: show who wrote it up top so you always know the chatter.
+        // Darken/lighten-proof: pitch-dark Twitch names (e.g. pure blue) are
+        // unreadable on True Night, so fall back to theme text in that case.
         mUsername.text = userName ?: ""
-        try {
-            val parsed = android.graphics.Color.parseColor(chatMessage.color ?: "#000000")
-            mUsername.setTextColor(parsed)
-        } catch (_: Exception) {
-            // keep default text color if Twitch sent garbage
-        }
+        mUsername.setTextColor(readableNameColor(chatMessage.color))
         mMessage.text = formattedMessage
         mMention.setOnClickListener { view: View? ->
             insertSendText("@$userName ")
@@ -990,12 +987,29 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         bottomSheetDialog!!.show()
     }
 
+    private fun readableNameColor(color: String?): Int {
+        val fallback = Service.getColorAttribute(R.attr.textColor, R.color.black_text, requireContext())
+        if (color == null) return fallback
+        return try {
+            val parsed = android.graphics.Color.parseColor(color)
+            if (Settings.isDarkTheme) {
+                val luminance = 0.299 * android.graphics.Color.red(parsed) +
+                        0.587 * android.graphics.Color.green(parsed) +
+                        0.114 * android.graphics.Color.blue(parsed)
+                if (luminance < 60) fallback else parsed
+            } else {
+                parsed
+            }
+        } catch (_: Exception) {
+            fallback
+        }
+    }
+
     /**
      * Frosty-style emote breakdown list: image on the left, keyword on the right.
      * Tap a row to paste that emote into the chat input (learn new emote names fast).
      */
-    private inner class EmoteBreakdownAdapter(
-        private val emotes: List<Emote>,
+    private inner class EmoteBreakdownAdapter(        private val emotes: List<Emote>,
         private val onEmoteTap: (Emote) -> Unit
     ) : RecyclerView.Adapter<EmoteBreakdownAdapter.EmoteBreakdownViewHolder>() {
 
