@@ -115,7 +115,6 @@ import com.perflyst.twire.service.Settings.streamPlayerShowNavigationBar
 import com.perflyst.twire.service.Settings.streamPlayerShowViewerCount
 import com.perflyst.twire.service.Settings.streamPlayerType
 import com.perflyst.twire.tasks.GetPanelsTask
-import com.perflyst.twire.tasks.GetStreamChattersTask
 import com.perflyst.twire.tasks.GetStreamURL
 import com.perflyst.twire.tasks.GetStreamViewersTask
 import com.perflyst.twire.utils.Constants
@@ -135,11 +134,9 @@ import kotlin.math.sqrt
 class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBinding::inflate),
     Player.Listener {
     private val fetchViewCountHandler = Handler()
-    private val fetchChattersHandler = Handler()
     private val vodHandler = Handler()
     private val qualityOptions = HashMap<String, TextView>()
     private val fetchViewCountDelay = 1000 * 60 // A minute
-    private val fetchChattersDelay = 1000 * 60 // 30 seco... Nah just kidding. Also a minute.
 
     @JvmField
     var playerFragmentCallback: PlayerFragmentListener? = null
@@ -647,24 +644,6 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
         releasePlayer()
 
         super.onDestroy()
-    }
-
-    private fun startFetchingCurrentChatters() {
-        val fetchChattersRunnable: Runnable = object : Runnable {
-            override fun run() {
-                val task = GetStreamChattersTask(mUserInfo!!.login)
-
-                Execute.background(
-                    task
-                ) { chatters: ArrayList<String>? -> }
-
-                if (!this@PlayerFragment.isDetached) {
-                    fetchChattersHandler.postDelayed(this, fetchChattersDelay.toLong())
-                }
-            }
-        }
-
-        fetchChattersHandler.post(fetchChattersRunnable)
     }
 
     /**

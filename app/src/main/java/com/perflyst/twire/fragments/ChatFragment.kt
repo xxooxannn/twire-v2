@@ -132,6 +132,20 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
     private var defaultBackgroundColor: ColorFilter? = null
     private var bottomSheetDialog: BottomSheetDialog? = null
 
+    /**
+     * Merged, de-duplicated emote list for `:` autocomplete, rebuilt only when an
+     * emote source loads — previously every keystroke flattened ~5-10k emotes.
+     */
+    private var allAutocompleteEmotes: List<Emote> = emptyList()
+
+    private fun rebuildAutocompleteEmotes() {
+        allAutocompleteEmotes = listOfNotNull(
+            customEmotes,
+            twitchEmotes,
+            subscriberEmotes
+        ).flatten().distinctBy { it.keyword }
+    }
+
     private enum class KeyboardState {
         CLOSED,
         SOFT,
@@ -481,6 +495,7 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
      */
     private fun twitchEmotesLoaded(emotesLoaded: MutableList<Emote>) {
         twitchEmotes = ArrayList(emotesLoaded)
+        rebuildAutocompleteEmotes()
         if (isLoggedIn) twitchEmotesFragment?.addTwitchEmotes()
     }
 
@@ -505,6 +520,7 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             adapter.notifyDataSetChanged()
 
             subscriberEmotes = ArrayList(subscriberEmotesLoaded)
+            rebuildAutocompleteEmotes()
             if (isLoggedIn) subscriberEmotesFragment?.addSubscriberEmotes()
         }
         checkRecentEmotes()
@@ -520,6 +536,7 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         customEmotes = ArrayList(global)
         customEmotes!!.addAll(channel)
         customEmotes!!.sort()
+        rebuildAutocompleteEmotes()
 
         checkRecentEmotes()
         if (isLoggedIn) customEmotesFragment?.addCustomEmotes()
@@ -704,10 +721,12 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             false
         })
 
-        // Greedy prefix + matches() = the LAST "@…"/":…" word in the input triggers
-        // suggestions. The old "…(.)([^ ]+)$" only matched when the trigger word was
-        // the entire input, so mid-sentence mentions/emotes never suggested anything.
-        val lastWordPattern = Pattern.compile("(?s).*(.)(\\S+)$")
+        // Greedy prefix + explicit trigger class = the LAST "@…"/":…" word in the
+        // input triggers suggestions. Two traps avoided: the old "…(.)([^ ]+)$"
+        // required the trigger to be the ENTIRE input (mid-sentence never worked),
+        // and a plain ".*(.)(\\S+)$" would backtrack g1 into the last letter
+        // ("hi :ke" -> g1='k') because '.' matches ':' too.
+        val lastWordPattern = Pattern.compile("(?s).*([@:])(\\S+)$")
         val fragment = this
         mSendText.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(charSequence: CharSequence?, i: Int, i1: Int, i2: Int) {
@@ -731,13 +750,9 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
                             .toMutableList()
                     } else if (firstCharacter == ":") {
                         // Frosty-style: emote autocomplete with images so you learn names.
-                        // Merge all known emotes, match substring, show image + keyword.
-                        val allEmotes = listOfNotNull(
-                            customEmotes,
-                            twitchEmotes,
-                            subscriberEmotes
-                        ).flatten().distinctBy { it.keyword }
-                        suggestions = allEmotes
+                        // Merged emote list is cached when emote sources load — this
+                        // used to flatten ~5-10k emotes on EVERY keystroke.
+                        suggestions = allAutocompleteEmotes
                             .filter { it.keyword.lowercase(Locale.getDefault()).contains(lastWord) }
                             .sortedBy { it.keyword.lowercase(Locale.getDefault()).indexOf(lastWord) }
                             .take(10)

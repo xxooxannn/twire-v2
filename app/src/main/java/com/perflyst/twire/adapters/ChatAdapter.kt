@@ -33,7 +33,7 @@ import com.perflyst.twire.service.Settings.isDarkTheme
 import com.perflyst.twire.service.Settings.messageSize
 import com.perflyst.twire.views.recyclerviews.ChatRecyclerView
 import timber.log.Timber
-import java.util.Locale
+import java.util.regex.Pattern
 
 /**
  * Created by SebastianRask on 03-03-2016.
@@ -172,10 +172,14 @@ class ChatAdapter(
     }
 
     fun getNamesThatMatches(match: String, suggestions: MutableList<String>) {
+        if (match.isEmpty()) return
+        // Compiled once per query (not per message per keystroke) and Pattern.quote
+        // keeps user input from being read as regex syntax (crash guard).
+        val pattern = Pattern.compile("^" + Pattern.quote(match) + "\\w+", Pattern.CASE_INSENSITIVE)
+        val matcher = pattern.matcher("")
         for (message in messages) {
             val name = message.name
-            if (name.lowercase(Locale.getDefault())
-                    .matches(("^$match\\w+").toRegex()) && !suggestions.contains(name)
+            if (matcher.reset(name).matches() && !suggestions.contains(name)
             ) {
                 suggestions.add(name)
             }
@@ -186,8 +190,8 @@ class ChatAdapter(
 
     /**
      * Low-end safe chatter list: names collected from messages already in memory.
-     * Zero extra network/battery — the old tmi.twitch.tv chatters endpoint is dead
-     * anyway (GetStreamChattersTask returns null), and Helix needs mod auth.
+     * Zero extra network/battery — the old tmi.twitch.tv chatters endpoint is dead,
+     * and Helix needs mod auth.
      */
     fun getAllChatters(): List<String> {
         return messages.map { it.name }.distinct().sorted()
@@ -343,10 +347,10 @@ class ChatAdapter(
         val maxMessages = 150
         if (messages.size > maxMessages) {
             val messagesOverLimit = messages.size - maxMessages
-            repeat(messagesOverLimit) {
-                messages.removeAt(0)
-                notifyItemRemoved(0)
-            }
+            // One range notification instead of one per message: fast chat used to
+            // fire N adapter updates per burst on top of the insert itself.
+            repeat(messagesOverLimit) { messages.removeAt(0) }
+            notifyItemRangeRemoved(0, messagesOverLimit)
         }
     }
 
