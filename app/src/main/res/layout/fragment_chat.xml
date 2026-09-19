@@ -165,6 +165,7 @@
                 android:layout_height="match_parent"
                 android:paddingLeft="8dp"
                 android:paddingRight="8dp"
+                android:contentDescription="@string/chat_chatters_cd"
                 android:src="@drawable/ic_group"
                 app:tint="?attr/chatRoomstateIconColor" />
 

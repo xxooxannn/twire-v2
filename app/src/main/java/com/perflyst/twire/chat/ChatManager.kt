@@ -143,8 +143,12 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
             // Frosty parity: backfill recent chat so the screen isn't empty on join.
             // One HTTP call, last 50 messages only (low-end safe), best-effort —
             // any failure silently falls through to live-only chat.
-            loadRecentHistory()
+            // Connect FIRST: the IRC handshake starts immediately instead of waiting
+            // up to ~8s (HTTP timeouts) behind the history fetch. History then runs
+            // on this worker thread, where it delays nothing, and is skipped when
+            // live messages already arrived so old lines never render below new ones.
             connect()
+            loadRecentHistory()
         } else {
             processVodChat()
         }
@@ -162,6 +166,9 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
                 "https://recent-messages.robotty.de/api/v2/recent-messages/${channel.login}"
             )
             if (json.isEmpty()) return
+            // Live chat already flowing? Skip the backfill so old history never
+            // renders underneath newer live messages.
+            if (liveMessageSeen) return
             val messages = JSONObject(json).optJSONArray("messages") ?: return
             val start = if (messages.length() > 50) messages.length() - 50 else 0
             for (i in start..<messages.length()) {
@@ -171,6 +178,9 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
             Timber.d(e, "Recent history unavailable, live-only chat")
         }
     }
+
+    /** Set once a live PRIVMSG for this channel has been handled. */
+    private var liveMessageSeen = false
 
     private fun parseHistoryLine(line: String?): ChatMessage? {
         if (line.isNullOrEmpty() || !line.contains("PRIVMSG #")) return null
@@ -451,10 +461,18 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
      */
     @EventSubscriber
     private fun handleMessage(message: ChannelMessageEvent) {
+        liveMessageSeen = true
         val messageEvent = message.messageEvent
         val badges = messageEvent.getBadges()
-        val displayName = message.user.name
-        val color = messageEvent.getTagValue("color").orElse(randomColor(displayName))
+        // display-name tag (e.g. "Cyr") matches what the history backfill renders;
+        // message.user.name is the lowercase login and made the same chatter show
+        // as two different people at the history/live boundary. Fallback to login.
+        val displayName = messageEvent.getTagValue("display-name")
+            .filter { it.isNotEmpty() }
+            .orElse(message.user.name)
+        val color = messageEvent.getTagValue("color")
+            .filter { it.isNotEmpty() }
+            .orElse(randomColor(displayName))
         val content = message.message
         val emotes =
             mEmoteManager.findTwitchEmotes(messageEvent.getTagValue("emotes").orElse(""), content)

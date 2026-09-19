@@ -314,6 +314,7 @@
     <string name="chat_message_recent_from">Recent from %1$s</string>
     <string name="chat_chatters_title">Chatters (%1$d)</string>
     <string name="chat_chatters_empty">No chatters seen yet — they appear as people talk</string>
+    <string name="chat_chatters_cd">Show chatters</string>
     <string name="chat_login_to_send">Log in to send messages</string>
     <string name="chat_login_required_toast">Log in from Settings to chat</string>
     <string name="stream_external_play_using">Play using…</string>

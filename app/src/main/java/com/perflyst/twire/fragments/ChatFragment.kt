@@ -319,6 +319,17 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         if (bottomSheetDialog != null) bottomSheetDialog!!.dismiss()
     }
 
+    override fun onDestroyView() {
+        super.onDestroyView()
+        // Rotating with the sheet open leaked the Activity context (the dialog
+        // held it with no owner lifecycle); OEM rebuilds then crash on dismiss.
+        if (bottomSheetDialog != null) {
+            bottomSheetDialog!!.setOnDismissListener(null)
+            bottomSheetDialog!!.dismiss()
+            bottomSheetDialog = null
+        }
+    }
+
     override fun onStop() {
         super.onStop()
         chatManager.stop()
