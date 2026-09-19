@@ -51,7 +51,33 @@ Flutter is unbounded work; fixing chat in Kotlin is bounded work.
   Helix needs mod auth, so it's built from messages in memory.
 - **Chat history on join**: same `recent-messages.robotty.de` source Frosty uses,
   last 50 messages backfilled as raw IRC (badges/color/emotes intact), best-effort.
+  Connects first, fetches second — a slow archive can't delay chat anymore; the
+  backfill is skipped if live messages already arrived (no out-of-order lines).
 - **Deletes/timeouts fade** with a "message deleted" label instead of vanishing.
+  Timeouts/bans (previously entirely unhandled — twitch4j delivers them as
+  `UserTimeoutEvent`/`UserBanEvent`, not `ClearChatEvent`) now fade that user's
+  messages too.
+- **Live + history render the same name**: live messages now use the
+  `display-name` tag (was lowercase login), so "Cyr" isn't "cyr" at the
+  history/live boundary.
+- **Tap-sheet actually taps on first tap**: removed `textIsSelectable` (it stole
+  the first tap for text focus — upstream #383).
+
+### Full audit round (bugs + perf)
+- **Autocomplete now triggers mid-sentence**: the old full-string regex only
+  matched when `@…`/`:…` was the *entire* input; now the last trigger word
+  anywhere fires suggestions (`lol :ke` works). Greedy-prefix regex with an
+  explicit `[@:]` class — a naive `.*(.)(\S+)$` backtracks g1 onto the wrong
+  character, so the trigger is matched explicitly.
+- **`:` autocomplete cost**: merged/deduped emote list (~5-10k emotes) was
+  rebuilt on every keystroke; now cached, rebuilt only when an emote source
+  loads. Mention autocomplete compiles one quoted regex per query instead of
+  150 per keystroke (also removes a `PatternSyntaxException` crash path).
+- **Sheet leak**: `onDestroyView` dismisses the tap sheet (rotation used to
+  leak the Activity context).
+- **Buffer trims** use one `notifyItemRangeRemoved` per burst, not per message.
+- **Dead code**: `GetStreamChattersTask` + never-started poller in
+  `PlayerFragment` deleted (endpoint died upstream long ago).
 
 ### Low-end / stability work (tested on Celeron laptop + Redmi, Android 16)
 - Chat buffer stays at 150, autocomplete capped at 10, history capped at 50.
