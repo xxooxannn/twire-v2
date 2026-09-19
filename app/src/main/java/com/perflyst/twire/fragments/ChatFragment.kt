@@ -245,6 +245,12 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
                 }
             }
 
+            override fun onUserPurge(login: String) {
+                if (!this.isFragmentActive) return
+
+                mChatAdapter.timeoutUser(login)
+            }
+
             override fun onConnectionChanged(state: WebsocketConnectionState) {
                 if (!this.isFragmentActive) return
 
@@ -687,7 +693,10 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             false
         })
 
-        val lastWordPattern = Pattern.compile("(.)([^ ]+)$")
+        // Greedy prefix + matches() = the LAST "@…"/":…" word in the input triggers
+        // suggestions. The old "…(.)([^ ]+)$" only matched when the trigger word was
+        // the entire input, so mid-sentence mentions/emotes never suggested anything.
+        val lastWordPattern = Pattern.compile("(?s).*(.)(\\S+)$")
         val fragment = this
         mSendText.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(charSequence: CharSequence?, i: Int, i1: Int, i2: Int) {

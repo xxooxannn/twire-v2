@@ -11,7 +11,9 @@ import com.github.twitch4j.chat.events.ChatConnectionStateEvent
 import com.github.twitch4j.chat.events.channel.ChannelMessageEvent
 import com.github.twitch4j.chat.events.channel.ClearChatEvent
 import com.github.twitch4j.chat.events.channel.DeleteMessageEvent
+import com.github.twitch4j.chat.events.channel.UserBanEvent
 import com.github.twitch4j.chat.events.channel.UserStateEvent
+import com.github.twitch4j.chat.events.channel.UserTimeoutEvent
 import com.github.twitch4j.chat.events.roomstate.ChannelStatesEvent
 import com.github.twitch4j.client.websocket.domain.WebsocketConnectionState
 import com.github.twitch4j.helix.domain.ChatBadgeSetList
@@ -481,6 +483,24 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
         callback.onClear(null)
     }
 
+    // twitch4j dispatches CLEARCHAT with a target as timeout/ban events, not
+    // ClearChatEvent. Without these subscribers a mod timing someone out was
+    // completely silent: the user's messages just stayed on screen forever.
+    @EventSubscriber
+    private fun handleUserTimeout(event: UserTimeoutEvent) {
+        onUserPurge(event.user.name)
+    }
+
+    @EventSubscriber
+    private fun handleUserBan(event: UserBanEvent) {
+        onUserPurge(event.user.name)
+    }
+
+    private fun onUserPurge(login: String?) {
+        if (login.isNullOrEmpty()) return
+        Execute.ui { callback.onUserPurge(login) }
+    }
+
     @EventSubscriber
     private fun handleClearMessage(event: DeleteMessageEvent) {
         callback.onClear(event.msgId)
@@ -606,6 +626,9 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
         fun onMessage(message: ChatMessage)
 
         fun onClear(target: String?)
+
+        /** A user was timed out or banned; their messages should be faded out. */
+        fun onUserPurge(login: String)
 
         fun onConnectionChanged(state: WebsocketConnectionState)
 

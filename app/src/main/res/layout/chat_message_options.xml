@@ -26,8 +26,7 @@
                 style="@style/stream_settings_item"
                 android:layout_height="wrap_content"
                 android:background="?attr/selectableItemBackground"
-                android:minHeight="48dp"
-                android:textIsSelectable="true" />
+                android:minHeight="48dp" />
 
             <TextView
                 android:id="@+id/text_emotes_label"

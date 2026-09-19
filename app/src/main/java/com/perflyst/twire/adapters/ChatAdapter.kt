@@ -316,6 +316,26 @@ class ChatAdapter(
     }
 
     /**
+     * A user was timed out or banned: fade their messages instead of leaving
+     * them visible forever (previous behavior — timeout events were never
+     * subscribed to). Clearchat gives us the lowercase login, messages carry
+     * display names, so compare case-insensitively.
+     */
+    fun timeoutUser(login: String?) {
+        if (login.isNullOrEmpty()) return
+
+        for (i in messages.indices.reversed()) {
+            val message = messages[i]
+            if (message.deletionNotice != null || !message.name.equals(login, ignoreCase = true)) {
+                continue
+            }
+
+            message.deletionNotice = context.getString(R.string.chat_message_deleted)
+            notifyItemChanged(i)
+        }
+    }
+
+    /**
      * Checks if the data structure contains more items that the specified max amount, if so. Remove the first item in the structure.
      * Notifies observers that item has been removed
      */
