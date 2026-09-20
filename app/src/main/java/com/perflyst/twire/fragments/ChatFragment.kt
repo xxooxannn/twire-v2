@@ -8,7 +8,9 @@ import android.graphics.PorterDuffColorFilter
 import android.graphics.Rect
 import android.os.Bundle
 import android.text.Editable
+import android.text.Spannable
 import android.text.SpannableStringBuilder
+import android.text.Spanned
 import android.text.TextWatcher
 import android.transition.Transition
 import android.view.HapticFeedbackConstants
@@ -34,6 +36,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
+import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
 import androidx.fragment.app.FragmentPagerAdapter
@@ -65,6 +68,7 @@ import com.perflyst.twire.databinding.FragmentChatBinding
 import com.perflyst.twire.databinding.FragmentEmoteGridBinding
 import com.perflyst.twire.databinding.ViewEmoteShowcaseBinding
 import com.perflyst.twire.fragments.ChatFragment.EmoteGridFragment.EmoteAdapter.EmoteViewHolder
+import com.perflyst.twire.misc.GlideImageSpan
 import com.perflyst.twire.misc.ResizeHeightAnimation
 import com.perflyst.twire.model.ChatMessage
 import com.perflyst.twire.model.ChatMessage.Companion.getEmotesFromMessage
@@ -82,7 +86,6 @@ import com.perflyst.twire.views.EditTextBackEvent
 import com.perflyst.twire.views.recyclerviews.AutoSpanRecyclerView
 import com.perflyst.twire.views.recyclerviews.ChatRecyclerView
 import com.perflyst.twire.views.recyclerviews.auto_span_behaviours.EmoteAutoSpanBehaviour
-import dev.chrisbanes.insetter.Insetter
 import org.parceler.Parcels
 import timber.log.Timber
 import java.util.Locale
@@ -133,10 +136,19 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
     private var bottomSheetDialog: BottomSheetDialog? = null
 
     /**
-     * Merged, de-duplicated emote list for `:` autocomplete, rebuilt only when an
+     * Merged, de-duplicated emote list for autocomplete, rebuilt only when an
      * emote source loads — previously every keystroke flattened ~5-10k emotes.
      */
     private var allAutocompleteEmotes: List<Emote> = emptyList()
+
+    /** keyword -> emote, for the WYSIWYG preview in the typing box. */
+    private var emoteKeywordMap: Map<String, Emote> = emptyMap()
+
+    /** (lowercase keyword, emote) pairs — precomputed so keystroke filtering never allocates. */
+    private var autocompleteLowerIndex: List<Pair<String, Emote>> = emptyList()
+
+    /** True while renderInputEmotes mutates spans (span ops don't fire TextWatcher, belt-and-suspenders). */
+    private var suppressInputEmoteRender = false
 
     private fun rebuildAutocompleteEmotes() {
         allAutocompleteEmotes = listOfNotNull(
@@ -144,6 +156,10 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             twitchEmotes,
             subscriberEmotes
         ).flatten().distinctBy { it.keyword }
+        emoteKeywordMap = allAutocompleteEmotes.associateBy { it.keyword }
+        autocompleteLowerIndex = allAutocompleteEmotes.map {
+            it.keyword.lowercase(Locale.getDefault()) to it
+        }
     }
 
     private enum class KeyboardState {
@@ -218,9 +234,6 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         setupKeyboardShowListener()
 
         setupTransition()
-
-        Insetter.builder().paddingBottom(WindowInsetsCompat.Type.systemBars(), false)
-            .applyToView(view)
     }
 
     private var roomStateMap: MutableMap<Class<out ChannelStatesEvent?>?, ImageView?>? = null
@@ -553,6 +566,9 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
     }
 
     private fun notifyKeyboardHeightRecorded(keyboardHeight: Int) {
+        // Don't clobber the recorded height on IME close — the emote keyboard
+        // panel sizes itself from the last real keyboard height.
+        if (keyboardHeight <= 0) return
         Timber.d("Keyboard height: %s", keyboardHeight)
         Settings.keyboardHeight = keyboardHeight
 
@@ -721,12 +737,14 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             false
         })
 
-        // Greedy prefix + explicit trigger class = the LAST "@…"/":…" word in the
-        // input triggers suggestions. Two traps avoided: the old "…(.)([^ ]+)$"
-        // required the trigger to be the ENTIRE input (mid-sentence never worked),
-        // and a plain ".*(.)(\\S+)$" would backtrack g1 into the last letter
-        // ("hi :ke" -> g1='k') because '.' matches ':' too.
-        val lastWordPattern = Pattern.compile("(?s).*([@:])(\\S+)$")
+        // The LAST word of the input triggers suggestions — the trailing token may
+        // start with "@" (mentions), ":" (explicit emote search) or nothing at all
+        // (bare-word emote suggestions, since typing a colon on mobile keyboards is
+        // miserable and keywords are matched WITHOUT colons when rendering anyway).
+        // Reluctant prefix + optional trigger group; verified: "hi :ke" -> (":",
+        // "ke"), "lol @na" -> ("@", "na"), "LO" -> ("", "LO"), "hi :ke there" ->
+        // ("", "there"), trailing space -> no match.
+        val lastWordPattern = Pattern.compile("(?s).*?([@:]?)(\\S+)$")
         val fragment = this
         mSendText.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(charSequence: CharSequence?, i: Int, i1: Int, i2: Int) {
@@ -740,26 +758,27 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
 
                 val matcher = lastWordPattern.matcher(fragment.sendText)
                 if (matcher.matches()) {
-                    val firstCharacter = matcher.group(1)
+                    val trigger = matcher.group(1)
                     val lastWord = matcher.group(2)!!.lowercase(Locale.getDefault())
-                    if (firstCharacter == "@") {
+                    if (trigger == "@") {
                         val names: MutableList<String> = ArrayList()
                         mChatAdapter.getNamesThatMatches(lastWord, names)
                         suggestions = names.take(10)
                             .map { com.perflyst.twire.adapters.SuggestionItem(it, null, false) }
                             .toMutableList()
-                    } else if (firstCharacter == ":") {
-                        // Frosty-style: emote autocomplete with images so you learn names.
-                        // Merged emote list is cached when emote sources load — this
-                        // used to flatten ~5-10k emotes on EVERY keystroke.
-                        suggestions = allAutocompleteEmotes
-                            .filter { it.keyword.lowercase(Locale.getDefault()).contains(lastWord) }
-                            .sortedBy { it.keyword.lowercase(Locale.getDefault()).indexOf(lastWord) }
+                    } else if (trigger == ":" || lastWord.length >= 2) {
+                        // Emote suggestions on bare words too (>= 2 chars so normal
+                        // single-letter typing doesn't spam the suggestion card).
+                        // Filtered against the precomputed lowercase index — no
+                        // per-keyword allocations on the hot path.
+                        suggestions = autocompleteLowerIndex
+                            .filter { it.first.contains(lastWord) }
+                            .sortedBy { it.first.indexOf(lastWord) }
                             .take(10)
                             .map {
                                 com.perflyst.twire.adapters.SuggestionItem(
-                                    it.keyword,
-                                    it.getEmoteUrl(1, Settings.isDarkTheme),
+                                    it.second.keyword,
+                                    it.second.getEmoteUrl(1, Settings.isDarkTheme),
                                     true
                                 )
                             }
@@ -768,6 +787,7 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
                 }
 
                 setSuggestions(suggestions)
+                renderInputEmotes()
             }
         })
 
@@ -804,15 +824,14 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
     }
 
     fun insertEmoteSuggestion(emoteKeyword: String) {
-        // Replace the current ":partial" word with the full ":keyword " so you can
-        // chain multiple emotes Frosty-style without retyping the colon.
+        // Replace the trailing partial word (":ke", "@x" or bare "LO") with the
+        // complete, colon-free keyword. Bare words must stay colon-free: chat
+        // renders emotes by EXACT word match (getEmotesFromMessage), so ":LOL"
+        // would send as literal text — the thing this feature exists to avoid.
         val currentInputText = this.sendText.toString()
-        val colonStart = currentInputText.lastIndexOf(':')
-        val newInputText = if (colonStart != -1) {
-            "${currentInputText.take(colonStart)}:$emoteKeyword "
-        } else {
-            "$currentInputText$emoteKeyword "
-        }
+        val match = Regex("(?:^|\\s)(\\S*)$").find(currentInputText)
+        val wordStart = match?.groups?.get(1)?.range?.first ?: currentInputText.length
+        val newInputText = currentInputText.take(wordStart) + emoteKeyword + " "
         mSendText.setText(newInputText)
         mSendText.setSelection(newInputText.length)
     }
@@ -822,6 +841,57 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             val mInputRect = Rect()
             mSendText.getGlobalVisibleRect(mInputRect)
             (parentFragment as LiveStreamFragment).setSuggestions(suggestions, mInputRect)
+        }
+    }
+
+    /**
+     * WYSIWYG typing: whole-word keywords in the typing box are drawn as their
+     * emote image, exactly like the sent chat message will render them. The
+     * underlying text is NEVER modified — the spans only cover the keyword, so
+     * `sendMessage()` still sends the plain keyword (Twitch renders it), the
+     * cursor never jumps, and backspace/undo keep working on the raw text.
+     *
+     * Rendered per keystroke: span ranges are compared against the previous
+     * render and reused when unchanged, so Glide hits its memory cache instead
+     * of reloading already-visible emotes.
+     */
+    private fun renderInputEmotes() {
+        if (!this::mSendText.isInitialized) return
+        val text = mSendText.editableText ?: return
+        if (text.isEmpty()) return
+
+        val found = getEmotesFromMessage(text.toString(), emoteKeywordMap)
+        suppressInputEmoteRender = true
+        try {
+            val existing = text.getSpans(0, text.length, GlideImageSpan::class.java)
+            val keep = HashSet<GlideImageSpan>()
+            val pixels = 28 // compact, matches chat's emote size 1
+            for ((position, emote) in found) {
+                val end = position + emote.keyword.length
+                if (end > text.length) continue
+                val url = emote.getEmoteUrl(1, Settings.isDarkTheme)
+                val reuse = existing.firstOrNull {
+                    text.getSpanStart(it) == position && text.getSpanEnd(it) == end && it.sourceUrl == url
+                }
+                if (reuse != null) {
+                    keep.add(reuse)
+                    continue
+                }
+                val span = GlideImageSpan(
+                    mSendText.context,
+                    url,
+                    mSendText,
+                    pixels,
+                    emote.getBestAvailableSize(1).toFloat(),
+                    remeasureOnLoad = false
+                )
+                text.setSpan(span, position, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                keep.add(span)
+            }
+            // Word deleted/edited past a keyword → its span is stale, drop it.
+            for (span in existing) if (span !in keep) text.removeSpan(span)
+        } finally {
+            suppressInputEmoteRender = false
         }
     }
 
@@ -859,11 +929,22 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
     private fun setupKeyboardShowListener() {
         if (activity == null) return
 
-        ViewCompat.setOnApplyWindowInsetsListener(requireView()) { _, insets ->
+        // targetSdk 35 forces edge-to-edge on Android 15+, so adjustResize is a
+        // no-op there: the window never resizes and the IME paints over the input
+        // (both orientations — worst in fullscreen where the input is invisible).
+        // We must consume the IME insets ourselves: pad the chat root so the
+        // input bar stays above the keyboard, and keep chat anchored to the
+        // bottom while it's open.
+        ViewCompat.setOnApplyWindowInsetsListener(requireView()) { view, insets ->
+            val imeInsets = insets.getInsets(WindowInsetsCompat.Type.ime())
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
-            val imeHeight = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
 
-            notifyKeyboardHeightRecorded(imeHeight)
+            // The old listener here was overwritten by an Insetter registration
+            // on the same view, so nothing ever consumed the IME insets.
+            view.updatePadding(bottom = maxOf(imeInsets.bottom, systemBars.bottom))
+
+            notifyKeyboardHeightRecorded(if (imeVisible) imeInsets.bottom else 0)
             if (imeVisible && keyboardState == KeyboardState.CLOSED) setKeyboardState(KeyboardState.SOFT)
 
             insets

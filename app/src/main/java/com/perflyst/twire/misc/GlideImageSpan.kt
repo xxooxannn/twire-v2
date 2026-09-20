@@ -20,8 +20,16 @@ class GlideImageSpan(
     url: String?,
     private val textView: TextView,
     assumedSize: Int,
-    scale: Float
+    scale: Float,
+    // EditText safety: reassigning the text to force a re-measure fires the
+    // TextWatcher again and can reset the cursor mid-typing. Callers editing
+    // live text pass false to relayout via invalidate/requestLayout instead.
+    private val remeasureOnLoad: Boolean = true
 ) : VerticalImageSpan(BlankDrawable()), Drawable.Callback {
+
+    /** The emote URL this span was created for — lets callers reuse spans. */
+    val sourceUrl: String? = url
+
     private var layerDrawable: LayerDrawable? = null
 
     private var mDrawable: Drawable? = null
@@ -86,7 +94,14 @@ class GlideImageSpan(
                     mDrawable = resource
 
                     if (resource.intrinsicWidth != assumedSize) {
-                        textView.text = textView.getText()
+                        if (remeasureOnLoad) {
+                            textView.text = textView.getText()
+                        } else {
+                            // Force the text layout to pick up the new span bounds
+                            // WITHOUT touching the text (keeps cursor + IME state).
+                            textView.invalidate()
+                            textView.requestLayout()
+                        }
                         Timber.tag("EmoteShift")
                             .d("Got $resource.intrinsicWidth but assumed $assumedSize ($url)")
                     } else {

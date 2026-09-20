@@ -79,6 +79,32 @@ Flutter is unbounded work; fixing chat in Kotlin is bounded work.
 - **Dead code**: `GetStreamChattersTask` + never-started poller in
   `PlayerFragment` deleted (endpoint died upstream long ago).
 
+### Mobile chat input round (suggestions + WYSIWYG + keyboard)
+- **Suggestions fire on bare words — no colon needed**: typing "LO" now shows
+  the LOL emote card above the box. Colons are miserable on mobile keyboards,
+  and chat matches emotes by EXACT word without colons anyway (a sent "LOL"
+  already renders as the emote). `@` mentions and `:` explicit search still
+  work; bare words need >= 2 chars so normal typing doesn't spam the card.
+- **WYSIWYG typing box**: whole-word keywords render as their emote image while
+  typing. Underlying text is never modified (spans only cover the keyword), so
+  sending still sends the plain keyword, the cursor never jumps, and
+  backspace/undo keep working. `GlideImageSpan` gained `remeasureOnLoad` so
+  EditText spans relayout via requestLayout instead of reassigning text (which
+  re-fired the TextWatcher and could reset the selection mid-typing).
+- **Insert fix**: tapping a suggestion replaces the trailing partial word with
+  the complete colon-free keyword. The old colon-anchored insert turned bare
+  "LO" + tap into "LOLOL", and colon-prefixed sends (":LOL") render as literal
+  text since chat matches emotes by exact word.
+- **Keyboard covering the input — fixed (both orientations, fullscreen too)**:
+  targetSdk 35 forces edge-to-edge on Android 15+, where adjustResize no longer
+  resizes the window — and the one insets listener that would have consumed the
+  IME insets was silently overwritten by an Insetter registration on the same
+  view, so nothing ever handled them. ChatFragment now consumes IME insets
+  itself and pads the chat root above the keyboard. The emote panel's recorded
+  height also survives IME close (0-height no longer clobbers it), and
+  per-keystroke suggestion filtering uses a precomputed lowercase index (zero
+  allocations on the hot path).
+
 ### Low-end / stability work (tested on Celeron laptop + Redmi, Android 16)
 - Chat buffer stays at 150, autocomplete capped at 10, history capped at 50.
 - No new background polling/services; dialogs and history are on-demand only.
