@@ -122,6 +122,39 @@ Flutter is unbounded work; fixing chat in Kotlin is bounded work.
 - True Night fixes: all new chat UI uses theme colors (was black-on-black);
   pitch-dark username colors fall back to readable theme text.
 
+### Bug-hunt round 2 (crashes + correctness)
+- **`randomColor` crash**: `String.hashCode()` is often negative and Kotlin `%`
+  keeps the sign, so the color lookup indexed `NamedUserChatColor` with a
+  negative number → `ArrayIndexOutOfBoundsException` for *every message* from
+  such a user (anyone without a `color` tag). Now `Math.floorMod`.
+- **Emote map was static** (`ChatEmoteManager.emoteKeywordToEmote`): shared by
+  every ChatManager, so switching channels mid-load leaked channel 1's BTTV/FFZ
+  emotes into channel 2, and reconnects appended onto an already-populated map.
+  Now per-instance.
+- **WYSIWYG box never picked up late-loading emotes**: the keyword map was
+  rebuilt when 7TV/BTTV/FFZ loaded, but the typing box only re-rendered on the
+  next keystroke — typed keywords sat as text until you typed again. Now
+  re-renders on rebuild. Also `sendMessage()` no longer re-flattens the merged
+  emote list on every send (it was the autocomplete cache's twin, rebuilt per
+  keystroke-send); it reads the cached map.
+- **History backfill could touch a dead fragment**: the fragment can die while
+  the recent-messages HTTP call runs; `isFragmentActive` now lives on the
+  `ChatCallback` interface and is checked before every history `onMessage`.
+- **Network calls could kill the chat thread**: badge fetches (Helix global +
+  channel + FFZ) in `ChatManager.run()` and `GetTwitchEmotesTask` threw on flaky
+  connections — one exception meant silent dead chat / no Twitch emotes + an app
+  crash from `run()`. Both now degrade gracefully (empty badges / empty emote
+  lists) and still deliver their callbacks.
+- **Deleted-highlight bleed** (`ChatAdapter`): a faded deleted message that
+  recycled a highlighted holder kept the accent background forever — background
+  is now reset every bind (system messages keep their drawable).
+- **`insertSendText` with unfocused input**: selection is -1 when the input has
+  never been focused (chatter list / tap sheet flows) → `substring(-1)` threw.
+  Clamped.
+- **"@null" self-mentions**: mention highlighting interpolated `userDisplayName`
+  before USERSTATE arrived, matching the literal string "@null" and highlighting
+  random messages. Guarded.
+
 ### Repo / branding / CI
 - Renamed Chautari → **Twire V2** (`com.perflyst.twire.v2`, launcher + setup +
   router strings, `TwireV2-*.apk`, version `2.0.0`).

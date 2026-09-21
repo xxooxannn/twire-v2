@@ -137,19 +137,21 @@ class ChatAdapter(
                 }
             }
 
-            if (message.isHighlight) {
+            holder.message.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSize)
+            holder.message.text = builder
+            // Recycled views must reset alpha AND background every bind —
+            // highlighting also tints the background, and a faded deleted message
+            // that reused a highlighted holder kept the accent color forever.
+            // System messages keep their own drawable; don't clobber it.
+            if (message.systemMessage.isEmpty()) {
                 holder.message.setBackgroundColor(
-                    Service.getColorAttribute(
+                    if (message.isHighlight) Service.getColorAttribute(
                         androidx.appcompat.R.attr.colorAccent,
                         R.color.accent,
                         context
-                    )
+                    ) else 0
                 )
             }
-
-            holder.message.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSize)
-            holder.message.text = builder
-            // Recycled views must reset alpha every bind.
             if (message.deletionNotice != null) {
                 holder.message.alpha = 0.5f
                 holder.message.append("\n(${message.deletionNotice})")

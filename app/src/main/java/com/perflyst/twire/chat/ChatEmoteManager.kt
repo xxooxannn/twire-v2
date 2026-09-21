@@ -23,6 +23,12 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
 
     private val emotePattern: Pattern = Pattern.compile("(\\w+):((?:\\d+-\\d+,?)+)")
 
+    // Per-instance, not static: the old static map was shared by every
+    // ChatManager, so switching channels mid-load let stale emotes from the
+    // previous channel leak into the new one (channel 2 could render channel
+    // 1's BTTV emotes), and reconnects re-populated an already-populated map.
+    private var emoteKeywordToEmote: MutableMap<String, Emote> = HashMap()
+
 
     /**
      * Connects to custom emote APIs.
@@ -30,7 +36,7 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
      * This must not be called on main UI thread
      */
     fun loadCustomEmotes(callback: EmoteFetchCallback) {
-        emoteKeywordToEmote = HashMap()
+        emoteKeywordToEmote = HashMap() // reset; safe to call again on reconnect
 
         // Emote Settings
         val enabled_bttv = chatEmoteBTTV
@@ -51,7 +57,7 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
                 for (i in 0..<globalEmotes.length()) {
                     val emote = ToBTTV(globalEmotes.getJSONObject(i))
                     globalCustomEmotes.add(emote)
-                    emoteKeywordToEmote!![emote.keyword] = emote
+                    emoteKeywordToEmote[emote.keyword] = emote
                 }
             }
 
@@ -74,7 +80,7 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
                     val emote = ToBTTV(channelEmotes.getJSONObject(i))
                     emote.isCustomChannelEmote = true
                     channelCustomEmotes.add(emote)
-                    emoteKeywordToEmote!![emote.keyword] = emote
+                    emoteKeywordToEmote[emote.keyword] = emote
                 }
             }
         } catch (e: JSONException) {
@@ -110,7 +116,7 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
                 for (emoteIndex in 0..<emoticons.length()) {
                     val emote = ToFFZ(emoticons.getJSONObject(emoteIndex))
                     globalCustomEmotes.add(emote)
-                    emoteKeywordToEmote!![emote.keyword] = emote
+                    emoteKeywordToEmote[emote.keyword] = emote
                 }
             }
 
@@ -127,7 +133,7 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
                             val emote = ToFFZ(emoticons.getJSONObject(emoteIndex))
                             emote.isCustomChannelEmote = true
                             channelCustomEmotes.add(emote)
-                            emoteKeywordToEmote!![emote.keyword] = emote
+                            emoteKeywordToEmote[emote.keyword] = emote
                         }
                     }
                 }
@@ -165,7 +171,7 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
                             emote.isCustomChannelEmote = true
                             channelCustomEmotes.add(emote)
                         }
-                        emoteKeywordToEmote!![emote.keyword] = emote
+                        emoteKeywordToEmote[emote.keyword] = emote
                     }
                 }
             }
@@ -247,7 +253,7 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
      * @return The List of emotes in the message
      */
     fun findCustomEmotes(message: String): Map<Int, Emote> {
-        return ChatMessage.getEmotesFromMessage(message, emoteKeywordToEmote!!)
+        return ChatMessage.getEmotesFromMessage(message, emoteKeywordToEmote)
     }
 
     /**
@@ -293,9 +299,5 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
 
     fun interface EmoteFetchCallback {
         fun onEmoteFetched()
-    }
-
-    companion object {
-        private var emoteKeywordToEmote: MutableMap<String, Emote>? = null
     }
 }

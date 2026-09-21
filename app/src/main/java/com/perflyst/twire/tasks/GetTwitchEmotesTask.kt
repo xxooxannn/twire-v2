@@ -17,21 +17,31 @@ class GetTwitchEmotesTask(
     private val subscriberEmotes: MutableList<Emote> = ArrayList()
 
     override fun run() {
-        val emotes = emoteSets.chunked(25)
-            .flatMap { helix.getEmoteSets(null, it).execute().emotes }
-
-        for (emoteData in emotes) {
-            val emote = Twitch(emoteData.name, emoteData.id)
-            if (emoteData.emoteSetId == "0") {
-                twitchEmotes.add(emote)
-            } else {
-                emote.isSubscriberEmote = true
-                subscriberEmotes.add(emote)
+        // Network call on a worker thread: a flaky connection (or an empty
+        // emote-sets list) used to throw straight out of run() and take the app
+        // down. Deliver empty lists instead — chat just starts without Twitch
+        // emotes, same as when the request times out upstream.
+        try {
+            val emotes = emoteSets.chunked(25).flatMap { set ->
+                helix.getEmoteSets(null, set).execute().emotes ?: emptyList()
             }
-        }
-        twitchEmotes.sort()
 
-        Timber.tag("Chat").d("Found twitch emotes: %s", twitchEmotes.size)
+            for (emoteData in emotes) {
+                val emote = Twitch(emoteData.name, emoteData.id)
+                if (emoteData.emoteSetId == "0") {
+                    twitchEmotes.add(emote)
+                } else {
+                    emote.isSubscriberEmote = true
+                    subscriberEmotes.add(emote)
+                }
+            }
+            twitchEmotes.sort()
+
+            Timber.tag("Chat").d("Found twitch emotes: %s", twitchEmotes.size)
+        } catch (e: Exception) {
+            Timber.e(e, "Twitch emote fetch failed — continuing without them")
+        }
+
         Execute.ui { delegate.onEmotesLoaded(twitchEmotes, subscriberEmotes) }
     }
 

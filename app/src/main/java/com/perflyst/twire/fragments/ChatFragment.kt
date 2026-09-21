@@ -160,7 +160,18 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         autocompleteLowerIndex = allAutocompleteEmotes.map {
             it.keyword.lowercase(Locale.getDefault()) to it
         }
+        // The WYSIWYG typing box resolves keywords against emoteKeywordMap.
+        // Rebuilding the map alone left the box's spans stale (typed from before
+        // 7TV/BTTV/FFZ loaded) until the next keystroke — re-render now that
+        // new keywords exist.
+        if (this::mSendText.isInitialized) renderInputEmotes()
+        // Historical: sendMessage() used to flatten the same lists on every send;
+        // now that a fresh merged map lives here, it just reads this field.
+        emoteKeywordMapForSend = emoteKeywordMap
     }
+
+    /** Fresh merged keyword map, rebuilt only when an emote source loads. */
+    private var emoteKeywordMapForSend: Map<String, Emote> = emptyMap()
 
     private enum class KeyboardState {
         CLOSED,
@@ -978,18 +989,14 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         mSendButton.performHapticFeedback(vibrationFeedback)
 
         Timber.d("Sending Message: %s", message)
-        val emotes = listOfNotNull(
-            customEmotes,
-            twitchEmotes,
-            subscriberEmotes
-        ).flatten().associateBy { it.keyword }
-
+        // Merged once per emote-source load (rebuildAutocompleteEmotes), not on
+        // every send — same list flatten the autocomplete cache already does.
         val chatMessage = ChatMessage(
             message,
             chatManager.userDisplayName ?: "You",
             chatManager.userColor,
             chatManager.getBadges(chatManager.userBadges ?: mutableMapOf()),
-            getEmotesFromMessage(message, emotes),
+            getEmotesFromMessage(message, emoteKeywordMapForSend),
             false
         )
         try {
@@ -1186,9 +1193,12 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
     }
 
     private fun insertSendText(message: String?) {
-        val insertPosition = mSendText.selectionStart
-        val textBefore = this.sendText.toString().substring(0, insertPosition)
-        val textAfter = this.sendText.toString().substring(insertPosition)
+        // Selection can be -1 (no focus) after opening this from the chatter
+        // list or the tap sheet — substring(-1) throws immediately.
+        val insertPosition = mSendText.selectionStart.coerceIn(0, mSendText.length())
+        val text = this.sendText.toString()
+        val textBefore = text.substring(0, insertPosition)
+        val textAfter = text.substring(insertPosition)
 
         mSendText.setText(textBefore + message + textAfter)
         mSendText.setSelection(mSendText.length() - textAfter.length)

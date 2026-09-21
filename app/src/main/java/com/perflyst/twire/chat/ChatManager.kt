@@ -134,10 +134,17 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
             }
         }
 
-        globalBadges = readBadges(TwireApplication.helix.getGlobalChatBadges(null))
-        channelBadges =
-            readBadges(TwireApplication.helix.getChannelChatBadges(null, channel.userId))
-        readFFZBadges()
+        // Badge endpoints are network calls; any of them can fail on flaky mobile
+        // connections. One throw here used to kill the whole chat thread — no
+        // messages, no reconnect, silent dead chat until the user left the stream.
+        try {
+            globalBadges = readBadges(TwireApplication.helix.getGlobalChatBadges(null))
+            channelBadges =
+                readBadges(TwireApplication.helix.getChannelChatBadges(null, channel.userId))
+            readFFZBadges()
+        } catch (e: Exception) {
+            Timber.e(e, "Badge fetch failed — continuing with empty badge tables")
+        }
 
         if (vodId == null) {
             // Frosty parity: backfill recent chat so the screen isn't empty on join.
@@ -169,6 +176,10 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
             // Live chat already flowing? Skip the backfill so old history never
             // renders underneath newer live messages.
             if (liveMessageSeen) return
+
+            // The fragment can die (back press, channel switch) while the history
+            // HTTP call runs; onMessage must not touch the UI after that.
+            if (!callback.isFragmentActive) return
             val messages = JSONObject(json).optJSONArray("messages") ?: return
             val start = if (messages.length() > 50) messages.length() - 50 else 0
             for (i in start..<messages.length()) {
@@ -233,6 +244,10 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
     }
 
     private fun onMessage(message: ChatMessage) {
+        // VOD/live paths guard with callback.isFragmentActive before calling this;
+        // the history backfill reaches it from the worker thread, where the
+        // fragment can die mid-loop. Never touch a dead fragment's UI.
+        if (!callback.isFragmentActive) return
         Execute.ui { callback.onMessage(message) }
     }
 
@@ -483,7 +498,10 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
         chatMessage.id = message.eventId
         chatMessage.systemMessage = messageEvent.getTagValue("system-msg").orElse("")
 
-        if (content.contains("@${this.userDisplayName}")) {
+        // userDisplayName arrives with USERSTATE, which can land after the first
+        // messages; interpolating null matched the literal "@null" and highlighted
+        // unrelated messages.
+        if (userDisplayName != null && content.contains("@${this.userDisplayName}")) {
             Timber.d("Highlighting message with mention: %s", content)
             chatMessage.isHighlight = true
         }
@@ -493,7 +511,10 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
 
     private fun randomColor(username: String): String? {
         val colors: Array<NamedUserChatColor?> = NamedUserChatColor.entries.toTypedArray()
-        return colors[username.hashCode() % colors.size]!!.hexCode
+        // String.hashCode() is often negative for short names; % keeps the sign in
+        // Kotlin and indexed the array with a negative number → ArrayIndexOutOfBounds
+        // crash for every message from such a user.
+        return colors[Math.floorMod(username.hashCode(), colors.size)]!!.hexCode
     }
 
     @EventSubscriber
@@ -641,6 +662,9 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
     }
 
     interface ChatCallback {
+        /** False once the UI owning this callback is gone; stops post-detach callbacks. */
+        val isFragmentActive: Boolean get() = true
+
         fun onMessage(message: ChatMessage)
 
         fun onClear(target: String?)
