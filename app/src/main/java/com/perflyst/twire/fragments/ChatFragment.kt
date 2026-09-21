@@ -266,7 +266,7 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         }
 
         chatManager = ChatManager(mUserInfo!!, vodID, vodOffset ?: 0, object : ChatCallback {
-            val isFragmentActive: Boolean
+            override val isFragmentActive: Boolean
                 get() = !isDetached && isAdded
 
             override fun onMessage(message: ChatMessage) {
