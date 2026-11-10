@@ -967,8 +967,17 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             val keypadHeight = (screenHeight - rect.bottom).coerceAtLeast(0)
             val imeVisible = keypadHeight > screenHeight * 0.15
 
-            // Emote panel manages its own height; don't also pad for a hidden IME.
-            val padding = if (imeVisible && keyboardState != KeyboardState.EMOTE) keypadHeight else 0
+            // Always respect 3-button/gesture navigation bar so the input isn't hidden
+            // behind it when the IME is closed.
+            val navBottom = ViewCompat.getRootWindowInsets(rootView)
+                ?.getInsets(WindowInsetsCompat.Type.navigationBars())?.bottom ?: 0
+
+            val padding = when {
+                // Emote panel has its own height; keep it above the nav bar.
+                keyboardState == KeyboardState.EMOTE -> navBottom
+                imeVisible -> maxOf(keypadHeight, navBottom)
+                else -> maxOf(keypadHeight, navBottom)
+            }
             if (rootView.paddingBottom != padding) {
                 rootView.setPadding(rootView.paddingLeft, rootView.paddingTop, rootView.paddingRight, padding)
             }
