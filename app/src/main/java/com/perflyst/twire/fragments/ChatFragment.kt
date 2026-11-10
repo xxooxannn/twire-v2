@@ -17,6 +17,7 @@ import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.View.OnFocusChangeListener
 import android.view.View.OnLongClickListener
 import android.view.ViewGroup
@@ -359,6 +360,10 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
 
     override fun onDestroyView() {
         super.onDestroyView()
+        keyboardGlobalLayoutListener?.let { l ->
+            view?.viewTreeObserver?.removeOnGlobalLayoutListener(l)
+            keyboardGlobalLayoutListener = null
+        }
         // Rotating with the sheet open leaked the Activity context (the dialog
         // held it with no owner lifecycle); OEM rebuilds then crash on dismiss.
         if (bottomSheetDialog != null) {
@@ -937,29 +942,44 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             .show()
     }
 
+    private var keyboardGlobalLayoutListener: ViewTreeObserver.OnGlobalLayoutListener? = null
+
+    /**
+     * Reliable keyboard handling that does NOT depend on WindowInsets dispatch
+     * (which never reaches this fragment's view because no ancestor has
+     * fitsSystemWindows, so the insets listener silently never fired — that is
+     * why the input bar was painted over by the IME, including in fullscreen).
+     *
+     * Instead we measure the actual visible display frame on every layout pass:
+     * when the soft keyboard is up the visible bottom shrinks, and we pad the
+     * chat root by exactly that amount so the input (and the emote panel) stay
+     * above the keyboard in both orientations and in fullscreen.
+     */
     private fun setupKeyboardShowListener() {
         if (activity == null) return
+        val rootView = requireView()
+        val listener = ViewTreeObserver.OnGlobalLayoutListener {
+            if (!isAdded || view == null) return@OnGlobalLayoutListener
+            val rect = Rect()
+            rootView.getWindowVisibleDisplayFrame(rect)
+            val screenHeight = rootView.rootView.height
+            if (screenHeight <= 0) return@OnGlobalLayoutListener
+            val keypadHeight = (screenHeight - rect.bottom).coerceAtLeast(0)
+            val imeVisible = keypadHeight > screenHeight * 0.15
 
-        // targetSdk 35 forces edge-to-edge on Android 15+, so adjustResize is a
-        // no-op there: the window never resizes and the IME paints over the input
-        // (both orientations — worst in fullscreen where the input is invisible).
-        // We must consume the IME insets ourselves: pad the chat root so the
-        // input bar stays above the keyboard, and keep chat anchored to the
-        // bottom while it's open.
-        ViewCompat.setOnApplyWindowInsetsListener(requireView()) { view, insets ->
-            val imeInsets = insets.getInsets(WindowInsetsCompat.Type.ime())
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            val imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
+            // Emote panel manages its own height; don't also pad for a hidden IME.
+            val padding = if (imeVisible && keyboardState != KeyboardState.EMOTE) keypadHeight else 0
+            if (rootView.paddingBottom != padding) {
+                rootView.setPadding(rootView.paddingLeft, rootView.paddingTop, rootView.paddingRight, padding)
+            }
 
-            // The old listener here was overwritten by an Insetter registration
-            // on the same view, so nothing ever consumed the IME insets.
-            view.updatePadding(bottom = maxOf(imeInsets.bottom, systemBars.bottom))
-
-            notifyKeyboardHeightRecorded(if (imeVisible) imeInsets.bottom else 0)
-            if (imeVisible && keyboardState == KeyboardState.CLOSED) setKeyboardState(KeyboardState.SOFT)
-
-            insets
+            notifyKeyboardHeightRecorded(if (imeVisible) keypadHeight else 0)
+            if (imeVisible && keyboardState == KeyboardState.CLOSED) {
+                setKeyboardState(KeyboardState.SOFT)
+            }
         }
+        rootView.viewTreeObserver.addOnGlobalLayoutListener(listener)
+        keyboardGlobalLayoutListener = listener
     }
 
 
