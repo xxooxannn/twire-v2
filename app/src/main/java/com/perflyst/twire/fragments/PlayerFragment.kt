@@ -309,8 +309,7 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
             }
         })
 
-        // Use ExoPlayer's overlay frame to intercept click events and pass them along
-        mOverlay.setOnClickListener { view: View? -> mVideoView.performClick() }
+        // Click handling (single/double tap) is set up in setupLandscapeChat().
 
         if (vodId == null) {
             val mTimeController = mVideoView.findViewById<View>(R.id.time_controller)
@@ -851,19 +850,44 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
     }
 
     private fun setupLandscapeChat() {
-        if (!isChatLandscapeSwipeable || !isChatInLandscapeEnabled) {
-            return
-        }
-
         val width: Int = getScreenRect(activity).height()
         val streamFragment = this
+        val gestureDetector = android.view.GestureDetector(requireContext(),
+            object : android.view.GestureDetector.SimpleOnGestureListener() {
+                override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                    mVideoView.performClick()
+                    return true
+                }
+
+                override fun onDoubleTap(e: MotionEvent): Boolean {
+                    // Double-tap to skip only for VODs (old streams/videos).
+                    if (vodId == null || player == null) return false
+                    val overlayWidth = mOverlay.width
+                    if (overlayWidth <= 0) return false
+                    val seekMs = 10_000L
+                    val duration = player!!.duration.coerceAtLeast(0L)
+                    val current = player!!.currentPosition
+                    val target = if (e.x < overlayWidth / 2f) {
+                        (current - seekMs).coerceAtLeast(0L)
+                    } else {
+                        if (duration > 0) (current + seekMs).coerceAtMost(duration)
+                        else (current + seekMs)
+                    }
+                    player!!.seekTo(target)
+                    return true
+                }
+            })
+
         val touchListener: OnTouchListener = object : OnTouchListener {
             private var downPosition = width
             private var widthOnDown = width
+            private var isChatSwipeGesture = false
 
             override fun onTouch(view: View?, event: MotionEvent): Boolean {
-                if (!isLandscape) {
-                    return false
+                val gestureHandled = gestureDetector.onTouchEvent(event)
+
+                if (!isLandscape || !isChatLandscapeSwipeable || !isChatInLandscapeEnabled) {
+                    return gestureHandled
                 }
 
                 val x = event.rawX.toInt()
@@ -877,43 +901,56 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
                         if (lParams.width > 0) widthOnDown = lParams.width
 
                         downPosition = event.rawX.toInt()
+                        isChatSwipeGesture = false
                     }
 
-                    MotionEvent.ACTION_UP -> {
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        if (!isChatSwipeGesture) {
+                            return gestureHandled
+                        }
                         val upPosition = event.rawX.toInt()
                         val deltaPosition = upPosition - downPosition
 
                         if (abs(deltaPosition.toDouble()) < 20) {
                             setLandscapeChat(landscapeChatVisible)
-                            return false
+                        } else {
+                            setLandscapeChat(upPosition < downPosition)
                         }
-
-                        setLandscapeChat(upPosition < downPosition)
+                        return true
                     }
 
                     MotionEvent.ACTION_MOVE -> {
-                        val layoutParams =
-                            mVideoWrapper.layoutParams as ConstraintLayout.LayoutParams
-                        val newWidth: Int = if (x > downPosition) { // Swiping right
-                            widthOnDown + x - downPosition
-                        } else { // Swiping left
-                            widthOnDown - (downPosition - x)
+                        val delta = x - downPosition
+                        if (!isChatSwipeGesture && abs(delta) >= 20) {
+                            isChatSwipeGesture = true
                         }
+                        if (isChatSwipeGesture) {
+                            val layoutParams =
+                                mVideoWrapper.layoutParams as ConstraintLayout.LayoutParams
+                            val newWidth: Int = if (x > downPosition) { // Swiping right
+                                widthOnDown + x - downPosition
+                            } else { // Swiping left
+                                widthOnDown - (downPosition - x)
+                            }
 
-                        layoutParams.width = max(
-                            min(newWidth.toDouble(), width.toDouble()),
-                            (width - streamFragment.landscapeChatTargetWidth).toDouble()
-                        ).toInt()
+                            layoutParams.width = max(
+                                min(newWidth.toDouble(), width.toDouble()),
+                                (width - streamFragment.landscapeChatTargetWidth).toDouble()
+                            ).toInt()
 
-                        mVideoWrapper.setLayoutParams(layoutParams)
+                            mVideoWrapper.setLayoutParams(layoutParams)
+                            rootView.invalidate()
+                            return true
+                        }
                     }
                 }
-                rootView.invalidate()
-                return false
+                return gestureHandled
             }
         }
 
         mOverlay.setOnTouchListener(touchListener)
+        // Single taps are handled by GestureDetector.onSingleTapConfirmed above.
+        mOverlay.setOnClickListener(null)
     }
 
     private fun setLandscapeChat(visible: Boolean) {
