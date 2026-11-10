@@ -965,24 +965,31 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             val screenHeight = rootView.rootView.height
             if (screenHeight <= 0) return@OnGlobalLayoutListener
             val keypadHeight = (screenHeight - rect.bottom).coerceAtLeast(0)
-            val imeVisible = keypadHeight > screenHeight * 0.15
+
+            // Combine visible-frame diff with root insets: in immersive/fullscreen the
+            // visible frame may not shrink for the IME, but root window insets can still
+            // report the keyboard height (and vice versa on other devices).
+            val rootInsets = ViewCompat.getRootWindowInsets(rootView)
+            val imeInsetsBottom = rootInsets?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
+            val imeVisibleFromInsets = rootInsets?.isVisible(WindowInsetsCompat.Type.ime()) == true
+            val imeHeight = maxOf(keypadHeight, imeInsetsBottom)
+            val imeVisible = imeHeight > screenHeight * 0.15 || imeVisibleFromInsets
 
             // Always respect 3-button/gesture navigation bar so the input isn't hidden
             // behind it when the IME is closed.
-            val navBottom = ViewCompat.getRootWindowInsets(rootView)
-                ?.getInsets(WindowInsetsCompat.Type.navigationBars())?.bottom ?: 0
+            val navBottom = rootInsets?.getInsets(WindowInsetsCompat.Type.navigationBars())?.bottom ?: 0
 
             val padding = when {
                 // Emote panel has its own height; keep it above the nav bar.
                 keyboardState == KeyboardState.EMOTE -> navBottom
-                imeVisible -> maxOf(keypadHeight, navBottom)
-                else -> maxOf(keypadHeight, navBottom)
+                imeVisible -> maxOf(imeHeight, navBottom)
+                else -> navBottom
             }
             if (rootView.paddingBottom != padding) {
                 rootView.setPadding(rootView.paddingLeft, rootView.paddingTop, rootView.paddingRight, padding)
             }
 
-            notifyKeyboardHeightRecorded(if (imeVisible) keypadHeight else 0)
+            notifyKeyboardHeightRecorded(if (imeVisible) imeHeight else 0)
             if (imeVisible && keyboardState == KeyboardState.CLOSED) {
                 setKeyboardState(KeyboardState.SOFT)
             }
