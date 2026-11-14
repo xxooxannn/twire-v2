@@ -1,0 +1,25 @@
+[package]
+name = "twire-core"
+version = "0.1.0"
+edition = "2021"
+description = "Native chat/emote hot path for Twire V2"
+publish = false
+
+[lib]
+name = "twire_core"
+# cdylib -> libtwire_core.so shipped in the APK, loaded by NativeChat.kt.
+# rlib   -> lets the host benchmarks and tests link the same code.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni = "0.21.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = "symbols"
+# panic = "unwind" (the default) is deliberate: every JNI entry point is
+# wrapped in catch_unwind, so a bug degrades to "no emotes" instead of an
+# abort that would kill the whole app process.
+

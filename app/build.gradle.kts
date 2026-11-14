@@ -178,3 +178,24 @@ configurations.all {
 sentry {
     includeProguardMapping = false
 }
+
+/**
+ * Rust chat core (rust/twire-core) -> src/main/jniLibs/<abi>/libtwire_core.so.
+ *
+ * The script skips itself when the Rust toolchain / cargo-ndk / NDK are absent,
+ * so a plain checkout still builds; NativeChat then reports itself unavailable
+ * and the Kotlin code paths handle chat exactly as before.
+ */
+val buildRustCore = tasks.register<Exec>("buildRustCore") {
+    group = "build"
+    description = "Builds the Rust chat core for every Android ABI into src/main/jniLibs"
+    workingDir = rootProject.projectDir
+    commandLine("bash", "rust/build-android.sh")
+    environment("ANDROID_NDK_HOME", android.ndkDirectory.absolutePath)
+    outputs.dir(layout.projectDirectory.dir("src/main/jniLibs"))
+    inputs.dir(rootProject.layout.projectDirectory.dir("rust/twire-core/src"))
+    inputs.file(rootProject.layout.projectDirectory.file("rust/twire-core/Cargo.toml"))
+    inputs.file(rootProject.layout.projectDirectory.file("rust/build-android.sh"))
+}
+
+tasks.named("preBuild").configure { dependsOn(buildRustCore) }

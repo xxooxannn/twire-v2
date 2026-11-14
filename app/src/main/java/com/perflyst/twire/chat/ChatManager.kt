@@ -553,6 +553,10 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
 
         if (twitchChat != null) twitchChat!!.close()
 
+        // Free this channel's native keyword table now rather than waiting for
+        // GC — opening stream after stream must not accumulate native indexes.
+        mEmoteManager.close()
+
         synchronized(vodLock) {
             (vodLock as Object).notify()
         }

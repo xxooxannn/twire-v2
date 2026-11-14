@@ -163,6 +163,66 @@ Flutter is unbounded work; fixing chat in Kotlin is bounded work.
   keys). **`ci.yml` is the build**: push to `master` → cloud `assembleDebug` →
   APK in the run's Artifacts. Laptop never builds.
 
+### Rust chat core (`rust/twire-core`)
+
+Chat's CPU cost was never the video path — it is the string work that runs for
+**every message** and **every keystroke**:
+
+| Hot path | Old Kotlin |
+|---|---|
+| Emote words in a message | `message.split(" ".toRegex())` → ArrayList of new Strings, boxed `HashMap<Int, Emote>` |
+| Twitch emotes from the IRC tag | regex + `split(",".toRegex())` + `split("-".toRegex())` per emote, new arrays each time |
+| Emote autocomplete | `filter { contains }` + `sortedBy { indexOf }` + `take(10)` over 5–10k pairs per keystroke |
+
+Those three paths are now a Rust library (`cdylib`, JNI) built by
+`rust/build-android.sh` into `app/src/main/jniLibs/<abi>/` and packaged per ABI.
+Kotlin talks to it through `chat/NativeChat.kt` + `chat/EmoteKeyIndex.kt`; the old
+Kotlin implementations remain as a fallback used automatically when the `.so` is
+absent or fails to load.
+
+What changed structurally:
+- One `EmoteKeyIndex` per emote set (built when a source loads) instead of a
+  per-message map walk; the Kotlin keyword `HashMap` is only allocated in the
+  fallback case.
+- Rust returns packed `IntArray`s: `[utf16Start, utf16Length, keywordIndex]`, so
+  chat never allocates per-word Strings and never boxes start offsets.
+- A bloom pre-filter rejects non-emote words before touching the hash map (~88%
+  of words in normal chat).
+- Twitch emote objects are cached per emote id (bounded), so re-rendering `LUL`
+  a thousand times allocates nothing.
+- Native indexes are closed on rebuild, on `ChatManager.stop()`, and on
+  `ChatFragment.onDestroyView()` (plus a finalizer safety net) — opening channel
+  after channel does not accumulate native memory.
+
+Measured with `rust/twire-core/bench/EmoteBench.java` (same JVM, same inputs,
+10k emotes, 20k messages; run it yourself with the command in
+`rust/twire-core/README.md`):
+
+| Path | Kotlin-equivalent | Rust core | Speedup | Java heap allocated |
+|---|---|---|---|---|
+| Emote word scan / message | 4.37 µs | 2.79 µs | 1.6× | 1740 B → 56 B (−96.8%) |
+| IRC `emotes` tag / message | 11.50 µs | 2.38 µs | 4.8× | 7526 B → 88 B (−98.8%) |
+| Autocomplete / query (10k emotes) | 2569 µs | 349 µs | 7.4× | 42 059 B → 41 B (−99.9%) |
+
+(Kotlin-side timings move ±20% between runs because the reference port is JIT-
+sensitive; the allocation figures and the native timings are stable.)
+
+The speedup matters on the two paths that hit the UI thread (autocomplete, and
+the WYSIWYG typing scan); the ~97–99.9% allocation cut is the battery/GC win,
+because every one of those bytes was previously young-generation garbage.
+
+The word scan is the one modest number: on desktop the JNI string copy is a
+large share of its 2.79 µs. A UTF-16 fast path (`GetStringChars` + stack-buffer
+word compare) is the next step if it ever matters on-device.
+
+### Rust core build rules
+- `./gradlew assembleDebug` builds it automatically when cargo, cargo-ndk, the
+  Android targets and the NDK are present; otherwise the task prints one line
+  and skips, and the app still builds.
+- CI installs Rust + cargo-ndk + NDK 25.0.8775105 and runs `cargo test`.
+- No network at runtime, no background work: the core is pure CPU where the old
+  code already ran.
+
 ## How to install
 
 1. Phone browser → this repo → **Actions** → latest green **CI** run → **Artifacts** → download `app`.

@@ -1,6 +1,5 @@
 package com.perflyst.twire.chat
 
-import com.perflyst.twire.model.ChatMessage
 import com.perflyst.twire.model.Emote
 import com.perflyst.twire.model.Emote.Companion.BTTV
 import com.perflyst.twire.model.UserInfo
@@ -27,7 +26,19 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
     // ChatManager, so switching channels mid-load let stale emotes from the
     // previous channel leak into the new one (channel 2 could render channel
     // 1's BTTV emotes), and reconnects re-populated an already-populated map.
+    //
+    // Backed by the Rust core when available (see EmoteKeyIndex): the keyword
+    // table is built once per load instead of being walked with a boxed
+    // HashMap for every incoming message.
     private var emoteKeywordToEmote: MutableMap<String, Emote> = HashMap()
+    private var customEmoteIndex: EmoteKeyIndex = EmoteKeyIndex.EMPTY
+
+    /**
+     * Twitch emote objects are immutable per emote id, and the same handful of
+     * emotes appear in almost every message. Reusing them keeps the renderer
+     * from allocating a new Emote + URL array for every occurrence.
+     */
+    private val twitchEmoteCache = HashMap<String, Emote>()
 
 
     /**
@@ -179,6 +190,10 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
             Timber.e(e)
         }
 
+        // One index for the whole message stream (was a per-message map walk).
+        customEmoteIndex.close()
+        customEmoteIndex = EmoteKeyIndex.of(emoteKeywordToEmote.values.toList())
+
         try {
             callback.onEmoteFetched()
         } catch (e: Exception) {
@@ -253,7 +268,14 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
      * @return The List of emotes in the message
      */
     fun findCustomEmotes(message: String): Map<Int, Emote> {
-        return ChatMessage.getEmotesFromMessage(message, emoteKeywordToEmote)
+        return customEmoteIndex.findInMessage(message)
+    }
+
+    /** Releases the native keyword index; chat is done with this channel. */
+    fun close() {
+        customEmoteIndex.close()
+        customEmoteIndex = EmoteKeyIndex.EMPTY
+        twitchEmoteCache.clear()
     }
 
     /**
@@ -263,7 +285,8 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
      * @return The list of emotes from the line
      */
     fun findTwitchEmotes(line: String?, message: String): MutableMap<Int, Emote> {
-        if (line == null) return mutableMapOf()
+        if (line == null || line.isEmpty()) return mutableMapOf()
+        if (NativeChat.isAvailable) return findTwitchEmotesNative(line, message)
 
         val emotes: MutableMap<Int, Emote> = HashMap()
         val emoteMatcher = emotePattern.matcher(line)
@@ -295,6 +318,58 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
         }
 
         return emotes
+    }
+
+    /**
+     * Same result as the regex path above, parsed by the Rust core: the tag is
+     * walked once and returned as packed `[idStart, idLength, rangeCount,
+     * start, end, ...]` groups. No `Regex`, no `split` arrays.
+     */
+    private fun findTwitchEmotesNative(tag: String, message: String): MutableMap<Int, Emote> {
+        val packed = NativeChat.nativeParseEmoteTag(tag)
+        if (packed.isEmpty()) return mutableMapOf()
+
+        val emotes: MutableMap<Int, Emote> = HashMap()
+        var cursor = 0
+        while (cursor < packed.size) {
+            val idStart = packed[cursor]
+            val idLength = packed[cursor + 1]
+            val rangeCount = packed[cursor + 2]
+            cursor += 3
+            if (idLength <= 0 || idStart < 0 || idStart + idLength > tag.length ||
+                rangeCount <= 0 || cursor + rangeCount * 2 > packed.size
+            ) {
+                continue
+            }
+
+            val rangeBase = cursor
+            cursor += rangeCount * 2
+            val firstStart = packed[rangeBase]
+            val firstEnd = packed[rangeBase + 1]
+            if (firstStart < 0 || firstEnd < firstStart || firstEnd >= message.length) {
+                // The Kotlin path would have thrown on substring() here; skip
+                // instead so a malformed tag can never kill the chat thread.
+                continue
+            }
+
+            val emote = twitchEmote(
+                tag.substring(idStart, idStart + idLength),
+                message.substring(firstStart, firstEnd + 1)
+            )
+            for (i in 0 until rangeCount) {
+                val start = packed[rangeBase + i * 2]
+                if (start >= 0) emotes[start] = emote
+            }
+        }
+        return emotes
+    }
+
+    private fun twitchEmote(id: String, keyword: String): Emote {
+        twitchEmoteCache[id]?.let { return it }
+        val emote = Emote.Twitch(keyword, id)
+        if (twitchEmoteCache.size >= 1024) twitchEmoteCache.clear()
+        twitchEmoteCache[id] = emote
+        return emote
     }
 
     fun interface EmoteFetchCallback {

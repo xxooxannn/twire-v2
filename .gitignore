@@ -57,3 +57,12 @@ app/debug/
 .kotlin
 
 sentry.properties
+
+# Rust chat core
+rust/twire-core/target/
+# .so files are build outputs of rust/build-android.sh, never committed
+app/src/main/jniLibs/
+
+# Local toolchains used to verify builds
+.android-sdk/
+.jdk/

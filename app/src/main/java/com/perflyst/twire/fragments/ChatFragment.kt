@@ -64,6 +64,7 @@ import com.perflyst.twire.adapters.ChatAdapter
 import com.perflyst.twire.adapters.ChatAdapter.ChatAdapterCallback
 import com.perflyst.twire.chat.ChatManager
 import com.perflyst.twire.chat.ChatManager.ChatCallback
+import com.perflyst.twire.chat.EmoteKeyIndex
 import com.perflyst.twire.databinding.ChatMessageOptionsBinding
 import com.perflyst.twire.databinding.FragmentChatBinding
 import com.perflyst.twire.databinding.FragmentEmoteGridBinding
@@ -72,7 +73,6 @@ import com.perflyst.twire.fragments.ChatFragment.EmoteGridFragment.EmoteAdapter.
 import com.perflyst.twire.misc.GlideImageSpan
 import com.perflyst.twire.misc.ResizeHeightAnimation
 import com.perflyst.twire.model.ChatMessage
-import com.perflyst.twire.model.ChatMessage.Companion.getEmotesFromMessage
 import com.perflyst.twire.model.Emote
 import com.perflyst.twire.model.UserInfo
 import com.perflyst.twire.service.Service
@@ -142,11 +142,12 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
      */
     private var allAutocompleteEmotes: List<Emote> = emptyList()
 
-    /** keyword -> emote, for the WYSIWYG preview in the typing box. */
-    private var emoteKeywordMap: Map<String, Emote> = emptyMap()
-
-    /** (lowercase keyword, emote) pairs — precomputed so keystroke filtering never allocates. */
-    private var autocompleteLowerIndex: List<Pair<String, Emote>> = emptyList()
+    /**
+     * Keyword lookup + autocomplete for the typing box and for sending, backed
+     * by the Rust core when it is loaded. Rebuilt only when an emote source
+     * loads — previously every keystroke filtered and sorted ~5-10k pairs.
+     */
+    private var emoteIndex: EmoteKeyIndex = EmoteKeyIndex.EMPTY
 
     /** True while renderInputEmotes mutates spans (span ops don't fire TextWatcher, belt-and-suspenders). */
     private var suppressInputEmoteRender = false
@@ -157,22 +158,19 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             twitchEmotes,
             subscriberEmotes
         ).flatten().distinctBy { it.keyword }
-        emoteKeywordMap = allAutocompleteEmotes.associateBy { it.keyword }
-        autocompleteLowerIndex = allAutocompleteEmotes.map {
-            it.keyword.lowercase(Locale.getDefault()) to it
-        }
-        // The WYSIWYG typing box resolves keywords against emoteKeywordMap.
-        // Rebuilding the map alone left the box's spans stale (typed from before
-        // 7TV/BTTV/FFZ loaded) until the next keystroke — re-render now that
-        // new keywords exist.
+        val rebuilt = EmoteKeyIndex.of(allAutocompleteEmotes)
+        val previous = emoteIndex
+        emoteIndex = rebuilt
+        emoteIndexForSend = rebuilt
+        previous.close()
+        // The WYSIWYG typing box resolves keywords against the index. Rebuilding
+        // it alone left the box's spans stale (typed from before 7TV/BTTV/FFZ
+        // loaded) until the next keystroke — re-render now that new keywords exist.
         if (this::mSendText.isInitialized) renderInputEmotes()
-        // Historical: sendMessage() used to flatten the same lists on every send;
-        // now that a fresh merged map lives here, it just reads this field.
-        emoteKeywordMapForSend = emoteKeywordMap
     }
 
-    /** Fresh merged keyword map, rebuilt only when an emote source loads. */
-    private var emoteKeywordMapForSend: Map<String, Emote> = emptyMap()
+    /** Same index, kept separately so send keeps working while a rebuild swaps it. */
+    private var emoteIndexForSend: EmoteKeyIndex = EmoteKeyIndex.EMPTY
 
     private enum class KeyboardState {
         CLOSED,
@@ -360,6 +358,10 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
 
     override fun onDestroyView() {
         super.onDestroyView()
+        // The view (and its emote sources) is going away; free the native index.
+        emoteIndex.close()
+        emoteIndex = EmoteKeyIndex.EMPTY
+        emoteIndexForSend = EmoteKeyIndex.EMPTY
         keyboardGlobalLayoutListener?.let { l ->
             view?.viewTreeObserver?.removeOnGlobalLayoutListener(l)
             keyboardGlobalLayoutListener = null
@@ -787,14 +789,11 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
                         // single-letter typing doesn't spam the suggestion card).
                         // Filtered against the precomputed lowercase index — no
                         // per-keyword allocations on the hot path.
-                        suggestions = autocompleteLowerIndex
-                            .filter { it.first.contains(lastWord) }
-                            .sortedBy { it.first.indexOf(lastWord) }
-                            .take(10)
+                        suggestions = emoteIndex.autocomplete(lastWord, 10)
                             .map {
                                 com.perflyst.twire.adapters.SuggestionItem(
-                                    it.second.keyword,
-                                    it.second.getEmoteUrl(1, Settings.isDarkTheme),
+                                    it.keyword,
+                                    it.getEmoteUrl(1, Settings.isDarkTheme),
                                     true
                                 )
                             }
@@ -876,7 +875,7 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         val text = mSendText.editableText ?: return
         if (text.isEmpty()) return
 
-        val found = getEmotesFromMessage(text.toString(), emoteKeywordMap)
+        val found = emoteIndex.findInMessage(text.toString())
         suppressInputEmoteRender = true
         try {
             val existing = text.getSpans(0, text.length, GlideImageSpan::class.java)
@@ -1032,7 +1031,7 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             chatManager.userDisplayName ?: "You",
             chatManager.userColor,
             chatManager.getBadges(chatManager.userBadges ?: mutableMapOf()),
-            getEmotesFromMessage(message, emoteKeywordMapForSend),
+            emoteIndexForSend.findInMessage(message),
             false
         )
         try {

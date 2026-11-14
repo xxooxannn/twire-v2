@@ -38,22 +38,5 @@ data class ChatMessage(
             }
         }
     }
-
-    companion object {
-        @JvmStatic
-        fun getEmotesFromMessage(message: String, emoteMap: Map<String, Emote>): Map<Int, Emote> {
-            var position = 0
-            val foundEmotes: MutableMap<Int, Emote> = HashMap()
-            for (word in message.split(" ".toRegex()).dropLastWhile { it.isEmpty() }
-                .toTypedArray()) {
-                val emote = emoteMap[word]
-                if (emote != null) {
-                    foundEmotes[position] = emote
-                }
-                position += word.length + 1
-            }
-
-            return foundEmotes
-        }
-    }
 }
+

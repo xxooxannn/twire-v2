@@ -1,5 +1,11 @@
 -dontobfuscate
 
+# JNI entry points in com.perflyst.twire.chat.NativeChat are resolved by symbol
+# name in libtwire_core.so — they must never be renamed or removed.
+-keepclasseswithmembernames,includedescriptorclasses class * {
+    native <methods>;
+}
+
 #  GlideWebpDecoder uses native code to decode webp, keep the jni interface.
 -keep public class com.bumptech.glide.integration.webp.WebpImage { *; }
 -keep public class com.bumptech.glide.integration.webp.WebpFrame { *; }

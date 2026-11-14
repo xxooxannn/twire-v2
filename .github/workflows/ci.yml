@@ -7,12 +7,14 @@ on:
       - "master"
     paths:
       - "app/**"
+      - "rust/**"
       - ".github/workflows/**"
   pull_request:
     branches:
       - "master"
     paths:
       - "app/**"
+      - "rust/**"
       - ".github/workflows/**"
 
 jobs:
@@ -38,6 +40,33 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      # Rust chat core (rust/twire-core). Without these steps the app still
+      # builds: buildRustCore skips and the Kotlin fallbacks handle chat.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/twire-core/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust/twire-core/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-ndk
+        run: command -v cargo-ndk >/dev/null || cargo install cargo-ndk --locked
+
+      - name: Install Android NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;25.0.8775105"
+
       - name: Build APK
         run: ./gradlew assembleDebug lintDebug --stacktrace
 
@@ -53,6 +82,24 @@ jobs:
         run: |
           rm -f ~/.gradle/caches/modules-2/modules-2.lock
           rm -f ~/.gradle/caches/modules-2/gc.properties
+  rust-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/twire-core/target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('rust/twire-core/Cargo.lock') }}
+      - name: Test native chat core
+        working-directory: rust/twire-core
+        run: cargo test --release
+
   test:
     runs-on: ubuntu-latest
     steps:
