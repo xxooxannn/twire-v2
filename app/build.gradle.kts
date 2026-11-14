@@ -191,7 +191,14 @@ val buildRustCore = tasks.register<Exec>("buildRustCore") {
     description = "Builds the Rust chat core for every Android ABI into src/main/jniLibs"
     workingDir = rootProject.projectDir
     commandLine("bash", "rust/build-android.sh")
-    environment("ANDROID_NDK_HOME", android.ndkDirectory.absolutePath)
+    // Wrapped in runCatching because android.ndkDirectory throws when the NDK is
+    // not installed; that used to fail configuration for every build (CI's
+    // emulator job, contributors without an NDK) even though this core is
+    // optional. Without it the script skips and Kotlin handles chat.
+    runCatching { android.ndkDirectory }
+        .getOrNull()
+        ?.takeIf { it.isDirectory }
+        ?.let { environment("ANDROID_NDK_HOME", it.absolutePath) }
     outputs.dir(layout.projectDirectory.dir("src/main/jniLibs"))
     inputs.dir(rootProject.layout.projectDirectory.dir("rust/twire-core/src"))
     inputs.file(rootProject.layout.projectDirectory.file("rust/twire-core/Cargo.toml"))
