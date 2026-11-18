@@ -1,16 +1,15 @@
 package com.perflyst.twire.chat
 
 import com.perflyst.twire.model.Emote
-import com.perflyst.twire.model.Emote.Companion.BTTV
 import com.perflyst.twire.model.UserInfo
 import com.perflyst.twire.service.Service
 import com.perflyst.twire.service.Settings.chatEmoteBTTV
 import com.perflyst.twire.service.Settings.chatEmoteFFZ
 import com.perflyst.twire.service.Settings.chatEmoteSEVENTV
-import org.json.JSONArray
-import org.json.JSONException
-import org.json.JSONObject
+import okhttp3.Request
 import timber.log.Timber
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
 /**
@@ -47,150 +46,19 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
      * This must not be called on main UI thread
      */
     fun loadCustomEmotes(callback: EmoteFetchCallback) {
-        emoteKeywordToEmote = HashMap() // reset; safe to call again on reconnect
-
-        // Emote Settings
-        val enabled_bttv = chatEmoteBTTV
-        val enabled_ffz = chatEmoteFFZ
-        val enabled_seventv = chatEmoteSEVENTV
-
-        // BetterTTV emotes
-        val BTTV_GLOBAL_URL = "https://api.betterttv.net/3/cached/emotes/global"
-        val BTTV_CHANNEL_URL = "https://api.betterttv.net/3/cached/users/twitch/${channel.userId}"
-        val CHANNEL_EMOTE_ARRAY = "channelEmotes"
-        val SHARED_EMOTE_ARRAY = "sharedEmotes"
-
-        try {
-            val bttvResponse = if (enabled_bttv) Service.urlToJSONString(BTTV_GLOBAL_URL) else ""
-            if (!bttvResponse.isEmpty()) {
-                val globalEmotes = JSONArray(bttvResponse)
-
-                for (i in 0..<globalEmotes.length()) {
-                    val emote = ToBTTV(globalEmotes.getJSONObject(i))
-                    globalCustomEmotes.add(emote)
-                    emoteKeywordToEmote[emote.keyword] = emote
-                }
-            }
-
-            val bttvChannelResponse =
-                if (enabled_bttv) Service.urlToJSONString(BTTV_CHANNEL_URL) else ""
-            if (!bttvChannelResponse.isEmpty()) {
-                val topChannelEmotes = JSONObject(bttvChannelResponse)
-                if (topChannelEmotes.has("message")) return
-
-                val channelEmotes = topChannelEmotes.getJSONArray(CHANNEL_EMOTE_ARRAY)
-
-                // Append shared emotes
-                val sharedEmotes = topChannelEmotes.getJSONArray(SHARED_EMOTE_ARRAY)
-                for (i in 0..<sharedEmotes.length()) {
-                    channelEmotes.put(sharedEmotes.get(i))
-                }
-
-                // Read all the emotes
-                for (i in 0..<channelEmotes.length()) {
-                    val emote = ToBTTV(channelEmotes.getJSONObject(i))
-                    emote.isCustomChannelEmote = true
-                    channelCustomEmotes.add(emote)
-                    emoteKeywordToEmote[emote.keyword] = emote
-                }
-            }
-        } catch (e: JSONException) {
-            Timber.e(e)
+        val result = CustomEmoteLoader(::fetchEmoteJson).load(
+            channel.userId, channel.login, chatEmoteBTTV, chatEmoteFFZ, chatEmoteSEVENTV
+        )
+        globalCustomEmotes.clear()
+        channelCustomEmotes.clear()
+        globalCustomEmotes.addAll(result.global)
+        channelCustomEmotes.addAll(result.channel)
+        emoteKeywordToEmote = HashMap()
+        // Channel aliases take precedence over global keywords.
+        for (emote in result.global + result.channel) {
+            emoteKeywordToEmote[emote.keyword] = emote
         }
 
-        // FFZ emotes
-        val FFZ_GLOBAL_URL = "https://api.frankerfacez.com/v1/set/global"
-        val FFZ_CHANNEL_URL = "https://api.frankerfacez.com/v1/room/${channel.login}"
-        val DEFAULT_SETS = "default_sets"
-        val SETS = "sets"
-        val EMOTICONS = "emoticons"
-
-        try {
-            val topObject =
-                if (enabled_ffz) JSONObject(Service.urlToJSONString(FFZ_GLOBAL_URL)) else JSONObject()
-
-            val defaultSets = if (topObject.has("defaultSets")) {
-                topObject.getJSONArray(DEFAULT_SETS)
-            } else {
-                JSONArray()
-            }
-
-            val sets = if (topObject.has("sets")) {
-                topObject.getJSONObject(SETS)
-            } else {
-                JSONObject()
-            }
-
-            for (setIndex in 0..<defaultSets.length()) {
-                val emoticons =
-                    sets.getJSONObject(defaultSets.get(setIndex).toString()).getJSONArray(EMOTICONS)
-                for (emoteIndex in 0..<emoticons.length()) {
-                    val emote = ToFFZ(emoticons.getJSONObject(emoteIndex))
-                    globalCustomEmotes.add(emote)
-                    emoteKeywordToEmote[emote.keyword] = emote
-                }
-            }
-
-            val ffzResponse = if (enabled_ffz) Service.urlToJSONString(FFZ_CHANNEL_URL) else ""
-            if (!ffzResponse.isEmpty()) {
-                val channelTopObject = JSONObject(ffzResponse)
-                if (!channelTopObject.has("error")) {
-                    val channelSets = channelTopObject.getJSONObject(SETS)
-                    val iterator = channelSets.keys()
-                    while (iterator.hasNext()) {
-                        val emoticons =
-                            channelSets.getJSONObject(iterator.next()).getJSONArray(EMOTICONS)
-                        for (emoteIndex in 0..<emoticons.length()) {
-                            val emote = ToFFZ(emoticons.getJSONObject(emoteIndex))
-                            emote.isCustomChannelEmote = true
-                            channelCustomEmotes.add(emote)
-                            emoteKeywordToEmote[emote.keyword] = emote
-                        }
-                    }
-                }
-            }
-        } catch (e: JSONException) {
-            Timber.e(e)
-        }
-
-        // 7TV emotes
-        // API Doc: https://7tv.io/v3/docs
-        val SEVENTV_GLOBAL_URL = "https://7tv.io/v3/emote-sets/global"
-        val SEVENTV_USER_URL = "https://7tv.io/v3/users/twitch/${channel.userId}"
-
-        try {
-            if (enabled_seventv) {
-                val emoteSets = HashMap<String, JSONObject>()
-
-                // Get the global emote set
-                emoteSets["global"] = JSONObject(Service.urlToJSONString(SEVENTV_GLOBAL_URL))
-
-                // Get the channel's emote sets
-                val userData = JSONObject(Service.urlToJSONString(SEVENTV_USER_URL))
-                if (!userData.isNull("emote_set")) emoteSets["channel"] =
-                    userData.getJSONObject("emote_set")
-
-                // Load the emote sets
-                for (entry in emoteSets.entries) {
-                    val emoteSetData = entry.value
-                    val emotes = emoteSetData.getJSONArray("emotes")
-                    for (i in 0..<emotes.length()) {
-                        val emote = To7TV(emotes.getJSONObject(i))
-                        if (entry.key == "global") {
-                            globalCustomEmotes.add(emote)
-                        } else {
-                            emote.isCustomChannelEmote = true
-                            channelCustomEmotes.add(emote)
-                        }
-                        emoteKeywordToEmote[emote.keyword] = emote
-                    }
-                }
-            }
-        } catch (e: JSONException) {
-            Timber.e(e)
-        }
-
-        // One index for the whole message stream (was a per-message map walk).
         customEmoteIndex.close()
         customEmoteIndex = EmoteKeyIndex.of(emoteKeywordToEmote.values.toList())
 
@@ -201,64 +69,19 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
         }
     }
 
-    @Throws(JSONException::class)
-    private fun ToBTTV(emoteObject: JSONObject): Emote {
-        val EMOTE_ID = "id"
-        val EMOTE_WORD = "code"
-
-        return BTTV(emoteObject.getString(EMOTE_WORD), emoteObject.getString(EMOTE_ID))
-    }
-
-    @Throws(JSONException::class)
-    private fun ToFFZ(emoteObject: JSONObject): Emote {
-        val EMOTE_NAME = "name"
-
-        // Frosty parity: prefer animated renditions (animated.4x > 2x > 1x),
-        // fall back to static urls (4x > 2x > 1x). Old code ignored "animated".
-        val animated = emoteObject.optJSONObject("animated")
-        val static = emoteObject.optJSONObject("urls")
-        val urlMap = HashMap<Int, String>()
-        for (source in listOfNotNull(animated, static)) {
-            val iterator = source.keys()
-            while (iterator.hasNext()) {
-                val key = iterator.next()
-                val size = key.toIntOrNull() ?: continue
-                if (!urlMap.containsKey(size)) {
-                    var url = source.getString(key)
-                    if (url.startsWith("//")) url = "https:$url"
-                    urlMap[size] = url
-                }
-            }
-            if (urlMap.isNotEmpty() && source == animated) break
+    private fun fetchEmoteJson(url: String): String {
+        // Third-party APIs expect JSON, not Twitch's legacy v5 Accept/Client-ID
+        // headers. Large 7TV sets also need more than Service's 5s timeout.
+        val request = Request.Builder().url(url).header("Accept", "application/json").build()
+        val client = if (url.startsWith("https://api.7tv.app/") || url.startsWith("https://7tv.io/")) {
+            sevenTvClient
+        } else {
+            Service.client
         }
-
-        return Emote(emoteObject.getString(EMOTE_NAME), urlMap)
-    }
-
-    @Throws(JSONException::class)
-    private fun To7TV(emoteObject: JSONObject): Emote {
-        val hostObject = emoteObject.getJSONObject("data").getJSONObject("host")
-        val baseUrl = "https:${hostObject.getString("url")}/"
-
-        val files = hostObject.getJSONArray("files")
-        val urlMap = HashMap<Int, String>()
-        for (i in 0..<files.length()) {
-            val file = files.getJSONObject(i)
-            val name = file.getString("name")
-            // 7TV serves webp (animated + static), avif and gif.
-            // Prefer webp, fall back to anything with a leading size like "2x.avif".
-            // Frosty parity: we need the name so tapping chat shows the keyword.
-            val size = name.take(1).toIntOrNull() ?: continue
-            if (size !in 1..4) continue
-            val isAnimatedFormat = name.endsWith(".webp") || name.endsWith(".gif")
-            val isStaticFallback = name.endsWith(".avif") || name.endsWith(".png")
-            if (!isAnimatedFormat && !isStaticFallback) continue
-            // Don't overwrite a webp/gif with an avif fallback for the same size
-            if (urlMap.containsKey(size) && isStaticFallback) continue
-            urlMap[size] = baseUrl + name
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw IOException("Emote request returned HTTP ${response.code}: $url")
+            return response.body?.string().orEmpty()
         }
-
-        return Emote(emoteObject.getString("name"), urlMap)
     }
 
     /**
@@ -370,6 +193,14 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
         if (twitchEmoteCache.size >= 1024) twitchEmoteCache.clear()
         twitchEmoteCache[id] = emote
         return emote
+    }
+
+    private companion object {
+        val sevenTvClient = Service.client.newBuilder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .callTimeout(75, TimeUnit.SECONDS)
+            .build()
     }
 
     fun interface EmoteFetchCallback {

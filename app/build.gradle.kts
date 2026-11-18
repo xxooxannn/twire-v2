@@ -147,6 +147,7 @@ dependencies {
 
     //Testing
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     val androidXTestVersion = "1.4.0"
     androidTestImplementation("androidx.test:runner:$androidXTestVersion")
     androidTestImplementation("androidx.test:rules:$androidXTestVersion")
