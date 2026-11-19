@@ -358,9 +358,10 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
 
     override fun onDestroyView() {
         if (this::mSendText.isInitialized) {
-            val text = mSendText.text
-            text.getSpans(0, text.length, GlideImageSpan::class.java)
-                .forEach(GlideImageSpan::clearImageRequest)
+            mSendText.text?.let { text ->
+                text.getSpans(0, text.length, GlideImageSpan::class.java)
+                    .forEach(GlideImageSpan::clearImageRequest)
+            }
         }
         super.onDestroyView()
         // The view (and its emote sources) is going away; free the native index.
