@@ -63,6 +63,7 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
     private var nextCommentOffset = 0.0
     private var vodOffset = 0
 
+    @Volatile
     private var isStopping = false
 
     // Data about the user and how to display his/hers message
@@ -125,12 +126,20 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
     override fun run() {
         isStopping = false
         Timber.d("Trying to start chat %s", channel.login)
-        mEmoteManager.loadCustomEmotes {
-            Execute.ui {
-                callback.onCustomEmoteIdFetched(
-                    mEmoteManager.channelCustomEmotes,
-                    mEmoteManager.globalCustomEmotes
-                )
+        Execute.background {
+            try {
+                mEmoteManager.loadCustomEmotes {
+                    if (isStopping) return@loadCustomEmotes
+                    val channelEmotes = ArrayList(mEmoteManager.channelCustomEmotes)
+                    val globalEmotes = ArrayList(mEmoteManager.globalCustomEmotes)
+                    Execute.ui {
+                        if (callback.isFragmentActive) {
+                            callback.onCustomEmoteIdFetched(channelEmotes, globalEmotes)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Custom emote loading failed")
             }
         }
 

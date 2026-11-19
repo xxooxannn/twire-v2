@@ -31,6 +31,7 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
     // HashMap for every incoming message.
     private var emoteKeywordToEmote: MutableMap<String, Emote> = HashMap()
     private var customEmoteIndex: EmoteKeyIndex = EmoteKeyIndex.EMPTY
+    private var isClosed = false
 
     /**
      * Twitch emote objects are immutable per emote id, and the same handful of
@@ -47,8 +48,34 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
      */
     fun loadCustomEmotes(callback: EmoteFetchCallback) {
         val result = CustomEmoteLoader(::fetchEmoteJson).load(
-            channel.userId, channel.login, chatEmoteBTTV, chatEmoteFFZ, chatEmoteSEVENTV
-        )
+            channel.userId,
+            channel.login,
+            chatEmoteBTTV,
+            chatEmoteFFZ,
+            chatEmoteSEVENTV
+        ) { partial ->
+            applyEmoteResult(partial)
+            notifyEmotesLoaded(callback)
+        }
+        applyEmoteResult(result)
+
+        // An all-empty result still needs to finish the UI's loading path.
+        if (result.global.isEmpty() && result.channel.isEmpty()) {
+            notifyEmotesLoaded(callback)
+        }
+    }
+
+    private fun notifyEmotesLoaded(callback: EmoteFetchCallback) {
+        try {
+            callback.onEmoteFetched()
+        } catch (e: Exception) {
+            Timber.e(e)
+        }
+    }
+
+    @Synchronized
+    private fun applyEmoteResult(result: CustomEmoteLoader.Result) {
+        if (isClosed) return
         globalCustomEmotes.clear()
         channelCustomEmotes.clear()
         globalCustomEmotes.addAll(result.global)
@@ -61,12 +88,6 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
 
         customEmoteIndex.close()
         customEmoteIndex = EmoteKeyIndex.of(emoteKeywordToEmote.values.toList())
-
-        try {
-            callback.onEmoteFetched()
-        } catch (e: Exception) {
-            Timber.e(e)
-        }
     }
 
     private fun fetchEmoteJson(url: String): String {
@@ -90,12 +111,16 @@ internal class ChatEmoteManager(private val channel: UserInfo) {
      * @param message The message to find emotes in
      * @return The List of emotes in the message
      */
+    @Synchronized
     fun findCustomEmotes(message: String): Map<Int, Emote> {
         return customEmoteIndex.findInMessage(message)
     }
 
     /** Releases the native keyword index; chat is done with this channel. */
+    @Synchronized
     fun close() {
+        if (isClosed) return
+        isClosed = true
         customEmoteIndex.close()
         customEmoteIndex = EmoteKeyIndex.EMPTY
         twitchEmoteCache.clear()

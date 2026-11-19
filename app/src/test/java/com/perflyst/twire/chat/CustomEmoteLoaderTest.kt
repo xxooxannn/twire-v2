@@ -5,6 +5,10 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.IOException
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class CustomEmoteLoaderTest {
     @Test
@@ -44,7 +48,7 @@ class CustomEmoteLoaderTest {
     @Test
     fun fallsBackAfterEmptyMalformedOrErrorResponses() {
         for (badResponse in listOf("", "<html>Bad Gateway</html>", """{"error":"Unavailable"}""")) {
-            val requests = ArrayList<String>()
+            val requests = Collections.synchronizedList(ArrayList<String>())
             val loader = CustomEmoteLoader { url ->
                 requests.add(url)
                 when {
@@ -130,7 +134,7 @@ class CustomEmoteLoaderTest {
 
     @Test
     fun noActiveSevenTvSetIsValidAndDoesNotRetry() {
-        val requests = ArrayList<String>()
+        val requests = Collections.synchronizedList(ArrayList<String>())
         val loader = CustomEmoteLoader { url ->
             requests.add(url)
             if (url.endsWith("emote-sets/global")) sevenTvSet(sevenTvEmote("Global"))
@@ -142,6 +146,50 @@ class CustomEmoteLoaderTest {
         assertEquals(1, result.global.size)
         assertTrue(result.channel.isEmpty())
         assertEquals(2, requests.size)
+    }
+
+    @Test
+    fun publishesFastProvidersWhileAnotherProviderIsStillLoading() {
+        val releaseSlowProvider = CountDownLatch(1)
+        val fastProviderPublished = CountDownLatch(1)
+        val worker = Executors.newSingleThreadExecutor()
+        val loader = CustomEmoteLoader { url ->
+            when {
+                url == "https://api.betterttv.net/3/cached/emotes/global" -> {
+                    releaseSlowProvider.await(3, TimeUnit.SECONDS)
+                    """[{"id":"1","code":"BTTVGlobal"}]"""
+                }
+                url.endsWith("/set/global") -> ffzGlobal()
+                url.contains("frankerfacez.com") -> """{"sets":{}}"""
+                url.endsWith("emote-sets/global") -> sevenTvSet(sevenTvEmote("SevenGlobal"))
+                url.contains("users/twitch") -> sevenTvUser(sevenTvEmote("SevenChannel"))
+                else -> """{"channelEmotes":[],"sharedEmotes":[]}"""
+            }
+        }
+
+        try {
+            val result = worker.submit<CustomEmoteLoader.Result> {
+                loader.load("71092938", "xqc", true, true, true) { partial ->
+                    if (partial.global.any { it.keyword == "FFZGlobal" }) {
+                        fastProviderPublished.countDown()
+                    }
+                }
+            }
+
+            assertTrue(
+                "Fast provider results should publish before the slow BTTV response",
+                fastProviderPublished.await(2, TimeUnit.SECONDS)
+            )
+            releaseSlowProvider.countDown()
+            val loaded = result.get(5, TimeUnit.SECONDS)
+            assertTrue(loaded.global.any { it.keyword == "BTTVGlobal" })
+            assertTrue(loaded.global.any { it.keyword == "FFZGlobal" })
+            assertTrue(loaded.global.any { it.keyword == "SevenGlobal" })
+            assertTrue(loaded.channel.any { it.keyword == "SevenChannel" })
+        } finally {
+            releaseSlowProvider.countDown()
+            worker.shutdownNow()
+        }
     }
 
     @Test

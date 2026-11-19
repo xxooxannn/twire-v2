@@ -438,6 +438,9 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
 
                             player.addListener(playerFragment)
                             mVideoView.setPlayer(player)
+                            // PlaybackService keeps the player (and its volume) when a
+                            // controller reconnects. Reflect that state in the new screen.
+                            mMuteSelector.isChecked = player.volume == 0f
 
                             if (vodId != null) {
                                 player.setPlaybackSpeed(playbackSpeed)

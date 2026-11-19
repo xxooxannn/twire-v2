@@ -36,11 +36,38 @@ class MentionAdapter(private val mDelegate: MentionAdapterDelegate) :
     override fun onBindViewHolder(holder: SuggestionViewHolder, position: Int) {
         val item = mentionSuggestions[position]
         holder.binding.txtSuggestion.text = (if (item.isEmote) ":" else "@") + item.text
+        val image = holder.binding.imageSuggestion
+        Glide.with(image).clear(image)
+        image.setImageDrawable(null)
         if (item.imageUrl == null) {
-            holder.binding.imageSuggestion.visibility = View.GONE
+            image.visibility = View.GONE
         } else {
-            holder.binding.imageSuggestion.visibility = View.VISIBLE
-            Glide.with(holder.itemView.context).load(item.imageUrl).into(holder.binding.imageSuggestion)
+            image.visibility = View.VISIBLE
+            Glide.with(image)
+                .load(item.imageUrl)
+                .listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
+                    override fun onLoadFailed(
+                        e: com.bumptech.glide.load.engine.GlideException?,
+                        model: Any?,
+                        target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
+                        isFirstResource: Boolean
+                    ): Boolean {
+                        image.visibility = View.GONE
+                        return false
+                    }
+
+                    override fun onResourceReady(
+                        resource: android.graphics.drawable.Drawable,
+                        model: Any?,
+                        target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
+                        dataSource: com.bumptech.glide.load.DataSource,
+                        isFirstResource: Boolean
+                    ): Boolean {
+                        image.visibility = View.VISIBLE
+                        return false
+                    }
+                })
+                .into(image)
         }
         holder.itemView.setOnClickListener {
             mDelegate.onSuggestionClick(item)
@@ -49,6 +76,11 @@ class MentionAdapter(private val mDelegate: MentionAdapterDelegate) :
 
     override fun getItemCount(): Int {
         return mentionSuggestions.size
+    }
+
+    override fun onViewRecycled(holder: SuggestionViewHolder) {
+        Glide.with(holder.binding.imageSuggestion).clear(holder.binding.imageSuggestion)
+        super.onViewRecycled(holder)
     }
 
     @SuppressLint("NotifyDataSetChanged")

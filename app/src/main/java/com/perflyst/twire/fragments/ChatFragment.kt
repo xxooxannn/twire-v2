@@ -357,6 +357,11 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
     }
 
     override fun onDestroyView() {
+        if (this::mSendText.isInitialized) {
+            val text = mSendText.text
+            text.getSpans(0, text.length, GlideImageSpan::class.java)
+                .forEach(GlideImageSpan::clearImageRequest)
+        }
         super.onDestroyView()
         // The view (and its emote sources) is going away; free the native index.
         emoteIndex.close()
@@ -873,9 +878,8 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
     private fun renderInputEmotes() {
         if (!this::mSendText.isInitialized) return
         val text = mSendText.editableText ?: return
-        if (text.isEmpty()) return
 
-        val found = emoteIndex.findInMessage(text.toString())
+        val found = if (text.isEmpty()) emptyMap() else emoteIndex.findInMessage(text.toString())
         suppressInputEmoteRender = true
         try {
             val existing = text.getSpans(0, text.length, GlideImageSpan::class.java)
@@ -898,13 +902,19 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
                     mSendText,
                     pixels,
                     emote.getBestAvailableSize(1).toFloat(),
-                    remeasureOnLoad = false
+                    remeasureOnLoad = false,
+                    fallbackText = emote.keyword
                 )
                 text.setSpan(span, position, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 keep.add(span)
             }
             // Word deleted/edited past a keyword → its span is stale, drop it.
-            for (span in existing) if (span !in keep) text.removeSpan(span)
+            for (span in existing) {
+                if (span !in keep) {
+                    span.clearImageRequest()
+                    text.removeSpan(span)
+                }
+            }
         } finally {
             suppressInputEmoteRender = false
         }
@@ -1212,9 +1222,12 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
             holder.name.text = emote.keyword
             val url = emote.getEmoteUrl(2, Settings.isDarkTheme)
             if (url == null) {
+                Glide.with(holder.image).clear(holder.image)
                 holder.image.setImageDrawable(null)
             } else {
-                Glide.with(holder.image.context).load(url).into(holder.image)
+                Glide.with(holder.image).clear(holder.image)
+                holder.image.setImageDrawable(null)
+                Glide.with(holder.image).load(url).into(holder.image)
             }
             // Long-press = just preview the name (like emote keyboard does)
             holder.itemView.setOnLongClickListener {
@@ -1225,6 +1238,11 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         }
 
         override fun getItemCount(): Int = emotes.size
+
+        override fun onViewRecycled(holder: EmoteBreakdownViewHolder) {
+            Glide.with(holder.image).clear(holder.image)
+            super.onViewRecycled(holder)
+        }
     }
 
     private fun insertSendText(message: String?) {
@@ -1297,8 +1315,10 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
         }
 
         internal fun addCustomEmotes() {
-            if (customEmotes != null && mAdapter != null && mAdapter!!.itemCount == 0) {
-                mAdapter!!.addEmotes(customEmotes!!)
+            if (customEmotes != null && mAdapter != null) {
+                // Provider results arrive incrementally; refresh the grid so
+                // later sources add their emotes without repeating prior ones.
+                mAdapter!!.replaceEmotes(customEmotes!!)
             }
         }
 
@@ -1358,11 +1378,50 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
 
                 val emoteSize = 2
                 val emoteUrl = emoteAtPosition.getEmoteUrl(emoteSize, isDarkTheme)
+                val image = holder.binding.imageEmote
+                val fallback = holder.binding.textEmote
+                Glide.with(image).clear(image)
                 if (emoteUrl == null) {
-                    holder.binding.textEmote.text = emoteAtPosition.keyword
+                    image.setImageDrawable(null)
+                    image.visibility = View.GONE
+                    fallback.text = emoteAtPosition.keyword
+                    fallback.visibility = View.VISIBLE
                 } else {
-                    Glide.with(requireContext()).load(emoteUrl).into(holder.binding.imageEmote)
+                    image.setImageDrawable(null)
+                    image.visibility = View.VISIBLE
+                    fallback.text = emoteAtPosition.keyword
+                    fallback.visibility = View.VISIBLE
+                    Glide.with(image)
+                        .load(emoteUrl)
+                        .listener(object : com.bumptech.glide.request.RequestListener<android.graphics.drawable.Drawable> {
+                            override fun onLoadFailed(
+                                e: com.bumptech.glide.load.engine.GlideException?,
+                                model: Any?,
+                                target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
+                                isFirstResource: Boolean
+                            ): Boolean {
+                                fallback.visibility = View.VISIBLE
+                                return false
+                            }
+
+                            override fun onResourceReady(
+                                resource: android.graphics.drawable.Drawable,
+                                model: Any?,
+                                target: com.bumptech.glide.request.target.Target<android.graphics.drawable.Drawable>?,
+                                dataSource: com.bumptech.glide.load.DataSource,
+                                isFirstResource: Boolean
+                            ): Boolean {
+                                fallback.visibility = View.GONE
+                                return false
+                            }
+                        })
+                        .into(image)
                 }
+            }
+
+            override fun onViewRecycled(holder: EmoteViewHolder) {
+                Glide.with(holder.binding.imageEmote).clear(holder.binding.imageEmote)
+                super.onViewRecycled(holder)
             }
 
             override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
@@ -1435,6 +1494,12 @@ class ChatFragment : BindingFragment<FragmentChatBinding>(FragmentChatBinding::i
                     emotes.removeAll(emotesToHide!!)
                 }
 
+                notifyDataSetChanged()
+            }
+
+            fun replaceEmotes(emoteList: List<Emote>) {
+                emotes.clear()
+                emotes.addAll(emoteList)
                 notifyDataSetChanged()
             }
 

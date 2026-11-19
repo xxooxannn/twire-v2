@@ -64,6 +64,8 @@ class ChatAdapter(
     override fun onBindViewHolder(holder: ContactViewHolder, position: Int) {
         try {
             val message = messages[position]
+            holder.message.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSize)
+            clearImageRequests(holder.message)
 
             val builder = SpannableStringBuilder()
             if (!message.systemMessage.isEmpty()) {
@@ -125,7 +127,8 @@ class ChatAdapter(
                         emote.getEmoteUrl(emoteSize, isNightTheme),
                         holder.message,
                         emotePixels,
-                        emote.getBestAvailableSize(emoteSize).toFloat() / emoteSize
+                        emote.getBestAvailableSize(emoteSize).toFloat() / emoteSize,
+                        fallbackText = emote.keyword
                     )
 
                     builder.setSpan(
@@ -137,7 +140,6 @@ class ChatAdapter(
                 }
             }
 
-            holder.message.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSize)
             holder.message.text = builder
             // Recycled views must reset alpha AND background every bind —
             // highlighting also tints the background, and a faded deleted message
@@ -170,6 +172,19 @@ class ChatAdapter(
         } catch (e: Exception) {
             //In case twitch doesn't comply to their own API.
             Timber.e(e, "Failed to show Message")
+        }
+    }
+
+    override fun onViewRecycled(holder: ContactViewHolder) {
+        clearImageRequests(holder.message)
+        super.onViewRecycled(holder)
+    }
+
+    private fun clearImageRequests(textView: TextView) {
+        val text = textView.text
+        if (text is Spanned) {
+            text.getSpans(0, text.length, GlideImageSpan::class.java)
+                .forEach(GlideImageSpan::clearImageRequest)
         }
     }
 
