@@ -8,6 +8,10 @@ on:
     paths:
       - "app/**"
       - "rust/**"
+      - "gradle/**"
+      - "*.gradle*"
+      - "gradle.properties"
+      - "gradlew*"
       - ".github/workflows/**"
   pull_request:
     branches:
@@ -15,9 +19,18 @@ on:
     paths:
       - "app/**"
       - "rust/**"
+      - "gradle/**"
+      - "*.gradle*"
+      - "gradle.properties"
+      - "gradlew*"
       - ".github/workflows/**"
 
 jobs:
+  build:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/apk.yml
+
   rust-core:
     runs-on: ubuntu-latest
     steps:

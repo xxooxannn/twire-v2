@@ -160,8 +160,9 @@ Flutter is unbounded work; fixing chat in Kotlin is bounded work.
   router strings, `TwireV2-*.apk`, version `2.0.0`).
 - Upstream remote kept as `upstream`; origin is this repo.
 - `.github/workflows/nightly.yml` → `.disabled` (needs Twire's private signing
-  keys). The **Build APK** workflow runs on relevant pushes to `master` and can
-  also be started manually. Download `TwireV2-debug-apk` from the run's Artifacts.
+  keys). **CI** builds the APK on relevant pushes to `master` and pull requests.
+  To build just the APK, start **Build APK** manually. Download
+  `TwireV2-debug-apk` from either run's Artifacts.
 
 ### Rust chat core (`rust/twire-core`)
 
