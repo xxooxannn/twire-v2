@@ -1443,7 +1443,7 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
         if (vodId != null) {
             var twitchPosition = com.perflyst.twire.service.Settings.getVodProgress(vodId!!) * 1000L
             // Store/resume one canonical Twitch position across both video sources.
-            if (previousItem?.mediaId == vodId) {
+            if (previousItem != null && previousItem.mediaId == vodId) {
                 val previousTimeline = VodTimeline(
                     previousItem.mediaMetadata.extras?.getLong(VodTimeline.EXTRA_VIDEO_OFFSET_MS, 0) ?: 0
                 )
