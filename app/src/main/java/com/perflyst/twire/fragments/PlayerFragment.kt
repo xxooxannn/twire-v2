@@ -163,6 +163,9 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
     private lateinit var mVideoView: PlayerView
     private var player: MediaController? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
+    private var controllerGeneration = 0
+    private var playerViewStarted = false
+    private val playerInitializationCallbacks = ArrayList<Runnable>()
     private var currentMediaItem: MediaItem? = null
     private var vodSource: VodSourceController? = null
     private var streamUrlRequest: ListenableFuture<*>? = null
@@ -449,57 +452,83 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
     }
 
     private fun initializePlayer(callback: Runnable) {
-        if (player == null) {
-            val sessionToken = SessionToken(
-                requireContext(),
-                ComponentName(requireContext(), PlaybackService::class.java)
-            )
-            controllerFuture = MediaController.Builder(requireContext(), sessionToken).buildAsync()
-            val playerFragment = this
-            Futures.addCallback<MediaController?>(
-                controllerFuture,
-                object : FutureCallback<MediaController?> {
-                    override fun onSuccess(result: MediaController?) {
-                        player = result
-                        player?.let { player ->
-                            callback.run()
-                            if (pendingStreamStart) startStreamWithQuality(prefStreamQuality)
+        val expectedView = view ?: return
+        playerInitializationCallbacks.add(callback)
+        if (!playerViewStarted) return
+        if (player != null) {
+            runPlayerInitializationCallbacks()
+            return
+        }
+        // onViewCreated/onStart/onResume share one connection without losing callbacks.
+        if (controllerFuture != null) return
 
-                            player.addListener(playerFragment)
-                            mVideoView.setPlayer(player)
-                            // PlaybackService keeps the player (and its volume) when a
-                            // controller reconnects. Reflect that state in the new screen.
-                            mMuteSelector.isChecked = player.volume == 0f
+        val sessionToken = SessionToken(
+            requireContext(),
+            ComponentName(requireContext(), PlaybackService::class.java)
+        )
+        val generation = ++controllerGeneration
+        val future = MediaController.Builder(requireContext(), sessionToken).buildAsync()
+        controllerFuture = future
+        val playerFragment = this
+        Futures.addCallback<MediaController?>(
+            future,
+            object : FutureCallback<MediaController?> {
+                override fun onSuccess(result: MediaController?) {
+                    if (generation != controllerGeneration || controllerFuture !== future ||
+                        view !== expectedView || !playerViewStarted
+                    ) {
+                        if (controllerFuture === future) releasePlayer()
+                        return
+                    }
+                    player = result
+                    player?.let { player ->
+                        runPlayerInitializationCallbacks()
 
-                            if (vodId != null) {
-                                player.setPlaybackSpeed(playbackSpeed)
-                                PlaybackService.sendSkipSilenceUpdate(player)
-                            }
+                        player.addListener(playerFragment)
+                        mVideoView.setPlayer(player)
+                        // PlaybackService keeps the player (and its volume) when a
+                        // controller reconnects. Reflect that state in the new screen.
+                        mMuteSelector.isChecked = player.volume == 0f
 
-                            currentMediaItem?.let { currentMediaItem ->
-                                player.setMediaItem(currentMediaItem, false)
-                                player.prepare()
-                            }
+                        if (vodId != null) {
+                            player.setPlaybackSpeed(playbackSpeed)
+                            PlaybackService.sendSkipSilenceUpdate(player)
+                        }
+
+                        currentMediaItem?.let { currentMediaItem ->
+                            player.setMediaItem(currentMediaItem, false)
+                            player.prepare()
                         }
                     }
+                }
 
-                    override fun onFailure(t: Throwable) {
-                        Timber.e(t, "Failed to create MediaController")
-                    }
-                },
-                ContextCompat.getMainExecutor(requireContext())
-            )
-        } else {
-            callback.run()
-        }
+                override fun onFailure(t: Throwable) {
+                    if (generation != controllerGeneration || controllerFuture !== future) return
+                    controllerFuture = null
+                    Timber.e(t, "Failed to create MediaController")
+                }
+            },
+            ContextCompat.getMainExecutor(requireContext())
+        )
+    }
+
+    private fun runPlayerInitializationCallbacks() {
+        if (!playerViewStarted || player == null || view == null) return
+        val callbacks = playerInitializationCallbacks.toList()
+        playerInitializationCallbacks.clear()
+        callbacks.forEach { it.run() }
+        if (pendingStreamStart) startStreamWithQuality(prefStreamQuality)
     }
 
     private fun releasePlayer() {
-        if (player == null) return
-        MediaController.releaseFuture(controllerFuture!!)
-        player!!.removeListener(this)
+        controllerGeneration++
+        val future = controllerFuture
+        controllerFuture = null
+        val currentPlayer = player
         player = null
-        updatePIPParameters()
+        currentPlayer?.removeListener(this)
+        if (future != null) MediaController.releaseFuture(future)
+        if (currentPlayer != null && view != null) updatePIPParameters()
     }
 
     val playWhenReady: Boolean
@@ -625,6 +654,7 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
 
     override fun onStart() {
         super.onStart()
+        playerViewStarted = true
         if (Util.SDK_INT > 23) {
             initializePlayer {}
         }
@@ -678,18 +708,23 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
 
     override fun onStop() {
         Timber.d("Player Fragment Stopped")
+        playerViewStarted = false
         super.onStop()
 
         if (!castingViewVisible && !this.isAudioOnlyModeEnabled && player != null && !streamPlayerLockedPlayback) {
             player!!.pause()
         }
 
-        if (Util.SDK_INT > 23) {
+        if (Util.SDK_INT > 23 || player == null) {
             releasePlayer()
         }
     }
 
     override fun onDestroyView() {
+        playerViewStarted = false
+        playerInitializationCallbacks.clear()
+        pendingStreamStart = false
+        releasePlayer()
         streamRequestGeneration++
         streamUrlRequest?.cancel(true)
         streamUrlRequest = null
@@ -1280,8 +1315,8 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
      * If no Quality URLS have yet been created then try to start stream with an aync task.
      */
     private fun startStreamWithQuality(quality: String?) {
-        // URL resolution can finish while the backgrounded fragment has no controller.
-        if (player == null) {
+        // URL resolution can finish while the fragment is stopped or has no controller.
+        if (!playerViewStarted || player == null) {
             pendingStreamStart = true
             return
         }
