@@ -50,12 +50,14 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaItem.LiveConfiguration
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Player.PositionInfo
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import androidx.media3.session.MediaController
@@ -105,6 +107,7 @@ import com.perflyst.twire.service.Service
 import com.perflyst.twire.service.Settings.chatLandscapeWidth
 import com.perflyst.twire.service.Settings.isChatInLandscapeEnabled
 import com.perflyst.twire.service.Settings.isChatLandscapeSwipeable
+import com.perflyst.twire.service.Settings.kickVodQuality
 import com.perflyst.twire.service.Settings.playbackSpeed
 import com.perflyst.twire.service.Settings.prefStreamQuality
 import com.perflyst.twire.service.Settings.streamPlayerAutoContinuePlaybackOnReturn
@@ -119,6 +122,9 @@ import com.perflyst.twire.tasks.GetStreamURL
 import com.perflyst.twire.tasks.GetStreamViewersTask
 import com.perflyst.twire.utils.Constants
 import com.perflyst.twire.utils.Execute
+import com.perflyst.twire.vod.KickQualityOptions
+import com.perflyst.twire.vod.KickTrackSelection
+import com.perflyst.twire.vod.KickVideoQuality
 import com.perflyst.twire.vod.VodSourceController
 import com.perflyst.twire.vod.VodTimeline
 import com.rey.material.widget.ProgressView
@@ -138,6 +144,7 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
     private val fetchViewCountHandler = Handler()
     private val vodHandler = Handler()
     private val qualityOptions = HashMap<String, TextView>()
+    private var kickVideoQualities: List<KickVideoQuality> = emptyList()
     private val fetchViewCountDelay = 1000 * 60 // A minute
 
     @JvmField
@@ -499,6 +506,7 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
                             player.setMediaItem(currentMediaItem, false)
                             player.prepare()
                         }
+                        refreshKickQualitySelections()
                     }
                 }
 
@@ -608,6 +616,55 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
             if (available) timeline.chatPosition(positionMs) else -1000,
             seek || availabilityChanged
         )
+    }
+
+    override fun onTracksChanged(tracks: Tracks) {
+        refreshKickQualitySelections()
+    }
+
+    override fun onPlaybackStateChanged(playbackState: Int) {
+        if (playbackState == Player.STATE_READY) refreshKickQualitySelections()
+    }
+
+    private fun isPlayingKickVod(): Boolean {
+        val media = player?.currentMediaItem ?: return false
+        val extras = media.mediaMetadata.extras ?: return false
+        return media.mediaId == vodId && extras.getBoolean(VodTimeline.EXTRA_KICK_VOD) &&
+            extras.getString(VodTimeline.EXTRA_KICK_VOD_ID) == vodSource?.kickVodId
+    }
+
+    private fun refreshKickQualitySelections() {
+        val controller = player ?: return
+        // A newly masked MediaItem can briefly retain the previous item's tracks.
+        if (!playerViewStarted || view == null || !isPlayingKickVod() ||
+            controller.playbackState != Player.STATE_READY ||
+            !controller.isCommandAvailable(Player.COMMAND_GET_TRACKS) ||
+            !controller.isCommandAvailable(Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS)
+        ) return
+        val qualities = KickTrackSelection.qualities(controller.currentTracks)
+        if (qualities != kickVideoQualities) {
+            kickVideoQualities = qualities
+            val masterUrl = controller.currentMediaItem?.localConfiguration?.uri?.toString() ?: return
+            val choices = linkedMapOf(GetStreamURL.QUALITY_AUTO to
+                Quality(getString(R.string.kick_vod_quality_auto), masterUrl))
+            qualities.forEach { choices[it.key] = Quality(it.label, masterUrl) }
+            updateQualitySelections(choices)
+        }
+        applyKickVideoQuality()
+    }
+
+    private fun applyKickVideoQuality() {
+        val controller = player ?: return
+        if (!playerViewStarted || !isPlayingKickVod() ||
+            controller.playbackState != Player.STATE_READY ||
+            !controller.isCommandAvailable(Player.COMMAND_GET_TRACKS) ||
+            !controller.isCommandAvailable(Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS)
+        ) return
+        val selected = KickQualityOptions.resolvePreference(kickVodQuality, kickVideoQualities)
+        val current = controller.trackSelectionParameters
+        val desired = KickTrackSelection.parameters(current, controller.currentTracks, selected)
+        if (desired != current) controller.trackSelectionParameters = desired
+        updateSelectedQuality(selected)
     }
 
     override fun onRenderedFirstFrame() {
@@ -1444,6 +1501,17 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
      * Sets the URL to the VideoView and ChromeCast and starts playback.
      */
     private fun playUrl(url: String?) {
+        kickVideoQualities = emptyList()
+        val controller = player
+        if (controller != null && controller.isCommandAvailable(Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS) &&
+            (vodSource?.isKick == true || controller.currentMediaItem?.mediaMetadata?.extras
+                ?.getBoolean(VodTimeline.EXTRA_KICK_VOD) == true)
+        ) {
+            // A saved Kick video override must never constrain a new Twitch source.
+            val current = controller.trackSelectionParameters
+            val cleared = current.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
+            if (cleared != current) controller.trackSelectionParameters = cleared
+        }
         val extras = Bundle()
         val timeline = vodSource?.timeline ?: VodTimeline()
         if (vodId == null) {
@@ -1555,6 +1623,7 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
         for (view in qualityOptions.values) {
             mQualityWrapper.removeView(view.parent as MaterialRippleLayout?)
         }
+        qualityOptions.clear()
 
         for (entry in availableQualities.entries) {
             val quality: Quality = entry.value
@@ -1579,6 +1648,16 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
      */
     private fun setQualityOnClick(qualityView: TextView, quality: String) {
         qualityView.setOnClickListener { v: View? ->
+            val currentIsKick = player?.currentMediaItem?.mediaMetadata?.extras
+                ?.getBoolean(VodTimeline.EXTRA_KICK_VOD) == true
+            if (currentIsKick || quality.startsWith("kick:")) {
+                if (isPlayingKickVod() && !isAudioOnlyModeEnabled) {
+                    kickVodQuality = quality
+                    applyKickVideoQuality()
+                    mQualityBottomSheet.dismiss()
+                }
+                return@setOnClickListener
+            }
             // don´t set audio only mode as default
             if (quality != "audio_only") {
                 prefStreamQuality = quality

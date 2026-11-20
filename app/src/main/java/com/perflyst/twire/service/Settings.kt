@@ -348,6 +348,9 @@ object Settings {
     fun getVodProgress(vodID: String): Int =
         preferences.getInt(STREAM_VOD_PROGRESS + vodID, 0)
 
+    // Kick uses native video tracks, with a preference separate from Twitch's quality URLs.
+    var kickVodQuality by Pref("kickVodQuality", GetStreamURL.QUALITY_AUTO)
+
     // These are used only by the xQc archive player, never by live streams or clips.
     fun useKickForVod(twitchVodId: String): Boolean =
         preferences.getBoolean("kickVodEnabled:$twitchVodId", true)

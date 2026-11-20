@@ -26,7 +26,12 @@ Manual chat adjustments do not change the saved video position.
 If no clear matching recording exists, or Kick cannot be reached, Twire explains
 that it is falling back to Twitch. An expired playback URL can be refreshed with
 the player's Retry action. Only recording IDs are saved, never signed playback
-URLs. Kick's available adaptive qualities are selected by Media3 (`Auto (Kick)`).
+URLs. Open the player's quality settings to choose **Auto (Kick)** or an available
+fixed video quality such as **1080p60**, **720p60**, **480p**, **360p** or **160p**.
+The list comes from the recording's supported video tracks, so it can vary by VOD
+and device. Changing quality keeps the master playlist, audio, playback position
+and chat timeline. The Kick quality preference is saved separately from Twitch's;
+if a saved quality is absent on a different recording, playback uses Auto.
 
 ## Limits
 
@@ -54,7 +59,10 @@ Twitch's existing live low-latency parser and request headers.
 ambiguity, unavailable recordings, and selecting VOD rather than live playback.
 `VodTimelineTest` covers both offset signs, source-switch round trips, resume,
 chat-only adjustments, and chat boundaries. The Android parcel test also checks
-that the Twitch broadcast start time survives recreation.
+that the Twitch broadcast start time survives recreation. `KickQualityOptionsTest`
+covers quality labels, ordering, duplicates and saved-preference fallback. The
+Android `KickTrackSelectionTest` checks fixed video selection, audio preservation,
+returning to Auto, unsupported resolutions and media-session bundle serialization.
 
 The existing **CI** / **Build APK** GitHub Actions workflows run the Android build,
 lint and JVM tests. CI also runs the native Rust tests and Android parcel tests on
