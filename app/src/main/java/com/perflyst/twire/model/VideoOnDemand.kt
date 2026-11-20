@@ -22,7 +22,8 @@ class VideoOnDemand(
     @JvmField val views: Int,
     @JvmField val length: Long,
     @JvmField var isBroadcast: Boolean = false,
-    @JvmField var channelInfo: ChannelInfo? = null
+    @JvmField var channelInfo: ChannelInfo? = null,
+    @JvmField val broadcastStartedAtMs: Long = recordedAt.toInstant().toEpochMilli()
 ) : Comparable<VideoOnDemand>, Parcelable {
     constructor(video: Video) : this(
         video.title,
@@ -33,7 +34,9 @@ class VideoOnDemand(
         video.userName,
         video.publishedAtInstant.atZone(ZoneOffset.UTC),
         video.viewCount,
-        Duration.parse("PT${video.duration}").seconds
+        Duration.parse("PT${video.duration}").seconds,
+        isBroadcast = video.type == "archive",
+        broadcastStartedAtMs = video.createdAtInstant.toEpochMilli()
     )
 
     override fun compareTo(other: VideoOnDemand): Int {

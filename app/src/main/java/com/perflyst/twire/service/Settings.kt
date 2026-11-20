@@ -348,6 +348,25 @@ object Settings {
     fun getVodProgress(vodID: String): Int =
         preferences.getInt(STREAM_VOD_PROGRESS + vodID, 0)
 
+    // These are used only by the xQc archive player, never by live streams or clips.
+    fun useKickForVod(twitchVodId: String): Boolean =
+        preferences.getBoolean("kickVodEnabled:$twitchVodId", true)
+
+    fun setUseKickForVod(twitchVodId: String, enabled: Boolean) =
+        preferences.edit { putBoolean("kickVodEnabled:$twitchVodId", enabled) }
+
+    fun getKickVodId(twitchVodId: String): String? =
+        preferences.getString("kickVodId:$twitchVodId", null)
+
+    fun setKickVodId(twitchVodId: String, kickVodId: String?) =
+        preferences.edit { putString("kickVodId:$twitchVodId", kickVodId) }
+
+    fun getKickChatOffset(twitchVodId: String, kickVodId: String): Int =
+        preferences.getInt("kickVodChatOffset:$twitchVodId:$kickVodId", 0)
+
+    fun setKickChatOffset(twitchVodId: String, kickVodId: String, seconds: Int) =
+        preferences.edit { putInt("kickVodChatOffset:$twitchVodId:$kickVodId", seconds) }
+
     /**
      * Stream Sleep Timer - Hour
      */

@@ -119,6 +119,8 @@ import com.perflyst.twire.tasks.GetStreamURL
 import com.perflyst.twire.tasks.GetStreamViewersTask
 import com.perflyst.twire.utils.Constants
 import com.perflyst.twire.utils.Execute
+import com.perflyst.twire.vod.VodSourceController
+import com.perflyst.twire.vod.VodTimeline
 import com.rey.material.widget.ProgressView
 import dev.chrisbanes.insetter.Insetter
 import dev.chrisbanes.insetter.ViewState
@@ -162,6 +164,11 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
     private var player: MediaController? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var currentMediaItem: MediaItem? = null
+    private var vodSource: VodSourceController? = null
+    private var streamUrlRequest: ListenableFuture<*>? = null
+    private var streamRequestGeneration = 0
+    private var pendingStreamStart = false
+    private var vodChatAvailable = true
     private lateinit var mToolbar: Toolbar
     private lateinit var mTitleText: TextView
     private lateinit var mVideoInterface: ConstraintLayout
@@ -196,7 +203,7 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
         override fun run() {
             if (player == null) return
 
-            ChatManager.instance?.updateVodProgress(player!!.getCurrentPosition(), false)
+            updateVodChat(player!!.getCurrentPosition(), false)
 
             if (player!!.isPlaying()) vodHandler.postDelayed(this, 1000)
         }
@@ -244,6 +251,27 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
         //  If no streamer info is available we cant show the stream.
         if (mUserInfo == null) {
             return popBackStack()
+        }
+
+        if (vodId != null && mUserInfo!!.login.equals("xqc", ignoreCase = true) &&
+            !requireArguments().containsKey(Constants.KEY_CLIP) &&
+            requireArguments().containsKey(VodTimeline.ARG_TWITCH_STARTED_AT_MS)
+        ) {
+            qualityURLs = null // Re-resolve expiring Kick URLs after this view is recreated.
+            vodSource = VodSourceController(
+                this, vodId!!,
+                requireArguments().getLong(VodTimeline.ARG_TWITCH_STARTED_AT_MS),
+                requireArguments().getLong(VodTimeline.ARG_TWITCH_DURATION_MS),
+                onReload = {
+                    qualityURLs = null
+                    triesForNextBest = 0
+                    startStreamWithTask()
+                },
+                onChatSyncChanged = {
+                    playerFragmentCallback?.onSeek()
+                    player?.let { updateVodChat(it.currentPosition, true) }
+                }
+            )
         }
 
         rootView = view as ViewGroup
@@ -435,6 +463,7 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
                         player = result
                         player?.let { player ->
                             callback.run()
+                            if (pendingStreamStart) startStreamWithQuality(prefStreamQuality)
 
                             player.addListener(playerFragment)
                             mVideoView.setPlayer(player)
@@ -525,9 +554,31 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
         val oldMs = oldPosition.positionMs
         val newMs = newPosition.positionMs
         // A seek is when we've gone backwards or we go more than 10 seconds forward.
-        val seek = oldMs > newMs || newMs - oldMs > 10000
+        val seek = vodSource != null || oldMs > newMs || newMs - oldMs > 10000
         if (seek) playerFragmentCallback!!.onSeek()
-        ChatManager.instance?.updateVodProgress(newMs, seek)
+        updateVodChat(newMs, seek)
+    }
+
+    private fun updateVodChat(positionMs: Long, seek: Boolean) {
+        val media = currentMediaItem ?: return
+        val extras = media.mediaMetadata.extras
+        val kickVodId = extras?.getString(VodTimeline.EXTRA_KICK_VOD_ID)
+        val timeline = VodTimeline(
+            extras?.getLong(VodTimeline.EXTRA_VIDEO_OFFSET_MS, 0) ?: 0,
+            if (kickVodId != null && vodId != null) {
+                com.perflyst.twire.service.Settings.getKickChatOffset(vodId!!, kickVodId) * 1000L
+            } else 0
+        )
+        val available = timeline.hasChat(
+            positionMs, arguments?.getLong(VodTimeline.ARG_TWITCH_DURATION_MS, 0) ?: 0
+        )
+        val availabilityChanged = vodChatAvailable != available
+        if (availabilityChanged) playerFragmentCallback?.onSeek()
+        vodChatAvailable = available
+        ChatManager.instance?.updateVodProgress(
+            if (available) timeline.chatPosition(positionMs) else -1000,
+            seek || availabilityChanged
+        )
     }
 
     override fun onRenderedFirstFrame() {
@@ -535,6 +586,7 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
+        vodHandler.removeCallbacks(vodRunnable)
         if (vodId != null && isPlaying) vodRunnable.run()
     }
 
@@ -635,6 +687,16 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
         if (Util.SDK_INT > 23) {
             releasePlayer()
         }
+    }
+
+    override fun onDestroyView() {
+        streamRequestGeneration++
+        streamUrlRequest?.cancel(true)
+        streamUrlRequest = null
+        vodSource?.dispose()
+        vodSource = null
+        vodHandler.removeCallbacks(vodRunnable)
+        super.onDestroyView()
     }
 
     override fun onDestroy() {
@@ -798,6 +860,7 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
         }
 
         menu.findItem(R.id.menu_item_playback).isVisible = vodId != null
+        menu.findItem(R.id.menu_item_vod_source).isVisible = vodSource != null
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
@@ -808,6 +871,11 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
 
         val itemId = item.itemId
         when (itemId) {
+            R.id.menu_item_vod_source -> {
+                vodSource?.showMenu()
+                return true
+            }
+
             R.id.menu_item_sleep -> {
                 sleepButtonClicked()
                 return true
@@ -1212,6 +1280,12 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
      * If no Quality URLS have yet been created then try to start stream with an aync task.
      */
     private fun startStreamWithQuality(quality: String?) {
+        // URL resolution can finish while the backgrounded fragment has no controller.
+        if (player == null) {
+            pendingStreamStart = true
+            return
+        }
+        pendingStreamStart = false
         if (qualityURLs == null) {
             startStreamWithTask()
         } else {
@@ -1226,6 +1300,9 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
                 showPauseIcon()
                 Timber.d("Starting Stream With a quality on $quality for ${mUserInfo!!.displayName}")
                 Timber.d("URLS: %s", qualityURLs!!.keys)
+            } else if (vodSource?.isKick == true) {
+                // Kick's master playlist supplies adaptive qualities to Media3.
+                startStreamWithQuality(GetStreamURL.QUALITY_AUTO)
             } else if (!qualityURLs!!.isEmpty()) {
                 Timber.d("Quality unavailable for this stream -  $quality. Trying next best")
                 tryNextBestQuality(quality)
@@ -1239,36 +1316,50 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
      * If no URLs are available for the stream, the user is notified.
      */
     private fun startStreamWithTask() {
-        val callback = Consumer { url: MutableMap<String, Quality>? ->
-            try {
-                if (!url!!.isEmpty()) {
-                    updateQualitySelections(url)
-                    qualityURLs = url
-
-                    if (!this.isAudioOnlyModeEnabled) {
-                        startStreamWithQuality(prefStreamQuality)
+        val generation = ++streamRequestGeneration
+        streamUrlRequest?.cancel(true)
+        val source = vodSource
+        if (source == null) {
+            startTwitchStreamTask(generation)
+        } else {
+            source.resolve { kickUrl ->
+                if (view != null && generation == streamRequestGeneration) {
+                    if (kickUrl == null) {
+                        startTwitchStreamTask(generation)
+                    } else {
+                        streamUrlsReady(linkedMapOf(
+                            GetStreamURL.QUALITY_AUTO to Quality(getString(R.string.kick_vod_quality_auto), kickUrl)
+                        ))
                     }
-                } else {
-                    playbackFailed()
                 }
-            } catch (e: IllegalStateException) {
-                Timber.e(e)
-            } catch (e: NullPointerException) {
-                Timber.e(e)
             }
         }
+    }
 
+    private fun streamUrlsReady(urls: MutableMap<String, Quality>?) {
+        if (urls.isNullOrEmpty()) {
+            playbackFailed()
+            return
+        }
+        updateQualitySelections(urls)
+        qualityURLs = urls
+        if (!isAudioOnlyModeEnabled || vodSource?.isKick == true) {
+            startStreamWithQuality(if (vodSource?.isKick == true) GetStreamURL.QUALITY_AUTO else prefStreamQuality)
+        }
+    }
+
+    private fun startTwitchStreamTask(generation: Int) {
         val types = resources.getStringArray(R.array.PlayerType)
-
-        val isClip = requireArguments().containsKey(Constants.KEY_CLIP)
         val task = GetStreamURL(
             mUserInfo!!.login,
             vodId,
             types[streamPlayerType],
             streamPlayerProxy,
-            isClip
+            requireArguments().containsKey(Constants.KEY_CLIP)
         )
-        Execute.background(task, callback)
+        streamUrlRequest = Execute.background(task, Consumer { urls ->
+            if (view != null && generation == streamRequestGeneration) streamUrlsReady(urls)
+        })
     }
 
     /**
@@ -1319,8 +1410,14 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
      */
     private fun playUrl(url: String?) {
         val extras = Bundle()
+        val timeline = vodSource?.timeline ?: VodTimeline()
         if (vodId == null) {
             extras.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, -1)
+        }
+        if (vodSource != null) {
+            extras.putLong(VodTimeline.EXTRA_VIDEO_OFFSET_MS, timeline.videoOffsetMs)
+            extras.putBoolean(VodTimeline.EXTRA_KICK_VOD, vodSource!!.isKick)
+            vodSource!!.kickVodId?.let { extras.putString(VodTimeline.EXTRA_KICK_VOD_ID, it) }
         }
 
         // Grab the preview image from the intent and give it to the media metadata
@@ -1341,18 +1438,28 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
             )
             .build()
 
+        val previousItem = player!!.currentMediaItem
+        currentMediaItem = mediaItem
         if (vodId != null) {
-            var startPosition = com.perflyst.twire.service.Settings.getVodProgress(vodId!!) * 1000L
-            // Don't lose the position if we're playing the same VOD
-            if (currentMediaItem != null && currentMediaItem!!.mediaId == vodId) {
-                startPosition = player!!.getCurrentPosition()
+            var twitchPosition = com.perflyst.twire.service.Settings.getVodProgress(vodId!!) * 1000L
+            // Store/resume one canonical Twitch position across both video sources.
+            if (previousItem?.mediaId == vodId) {
+                val previousTimeline = VodTimeline(
+                    previousItem.mediaMetadata.extras?.getLong(VodTimeline.EXTRA_VIDEO_OFFSET_MS, 0) ?: 0
+                )
+                twitchPosition = previousTimeline.twitchPosition(player!!.currentPosition)
             }
-
+            var startPosition = timeline.videoPosition(twitchPosition)
+            val duration = vodSource?.videoDurationMs ?: 0
+            if (duration > 0) startPosition = startPosition.coerceAtMost(duration - 1)
             player!!.setMediaItem(mediaItem, startPosition)
+            if (vodSource != null) {
+                playerFragmentCallback?.onSeek()
+                updateVodChat(startPosition, true)
+            }
         } else {
             player!!.setMediaItem(mediaItem, false)
         }
-        currentMediaItem = mediaItem
         player!!.prepare()
 
         player!!.play()

@@ -117,8 +117,9 @@ class ModelParcelableTest {
             ZonedDateTime.parse("1970-01-01T00:00:00.000Z"),
             1,
             2,
-            false,
-            null
+            true,
+            null,
+            1795194000000L
         )
 
         val newVideoOnDemand = clone(videoOnDemand)!!
@@ -129,5 +130,7 @@ class ModelParcelableTest {
         Assert.assertEquals(videoOnDemand.views.toLong(), newVideoOnDemand.views.toLong())
         Assert.assertEquals(videoOnDemand.length, newVideoOnDemand.length)
         Assert.assertEquals(videoOnDemand.recordedAt, newVideoOnDemand.recordedAt)
+        Assert.assertEquals(videoOnDemand.isBroadcast, newVideoOnDemand.isBroadcast)
+        Assert.assertEquals(videoOnDemand.broadcastStartedAtMs, newVideoOnDemand.broadcastStartedAtMs)
     }
 }
