@@ -643,8 +643,9 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
         ) return
         val qualities = KickTrackSelection.qualities(controller.currentTracks)
         if (qualities != kickVideoQualities) {
+            val masterUrl = qualityURLs?.get(GetStreamURL.QUALITY_AUTO)?.url
+                ?: currentMediaItem?.localConfiguration?.uri?.toString() ?: return
             kickVideoQualities = qualities
-            val masterUrl = controller.currentMediaItem?.localConfiguration?.uri?.toString() ?: return
             val choices = linkedMapOf(GetStreamURL.QUALITY_AUTO to
                 Quality(getString(R.string.kick_vod_quality_auto), masterUrl))
             qualities.forEach { choices[it.key] = Quality(it.label, masterUrl) }
@@ -656,13 +657,27 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
     private fun applyKickVideoQuality() {
         val controller = player ?: return
         if (!playerViewStarted || !isPlayingKickVod() ||
-            controller.playbackState != Player.STATE_READY ||
-            !controller.isCommandAvailable(Player.COMMAND_GET_TRACKS) ||
             !controller.isCommandAvailable(Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS)
         ) return
-        val selected = KickQualityOptions.resolvePreference(kickVodQuality, kickVideoQualities)
+        val tracks: Tracks
+        val selected: String
+        if (kickVodQuality == GetStreamURL.QUALITY_AUTO) {
+            // Auto must release a fixed quality even if that quality is stalled buffering.
+            tracks = Tracks.EMPTY
+            selected = GetStreamURL.QUALITY_AUTO
+        } else {
+            // A nonempty cache means this item reached READY with fresh tracks already.
+            // Keep allowing a lower fixed quality during subsequent rebuffering.
+            if (kickVideoQualities.isEmpty() ||
+                !controller.isCommandAvailable(Player.COMMAND_GET_TRACKS)
+            ) return
+            tracks = controller.currentTracks
+            val available = KickTrackSelection.qualities(tracks)
+            if (available.isEmpty()) return
+            selected = KickQualityOptions.resolvePreference(kickVodQuality, available)
+        }
         val current = controller.trackSelectionParameters
-        val desired = KickTrackSelection.parameters(current, controller.currentTracks, selected)
+        val desired = KickTrackSelection.parameters(current, tracks, selected)
         if (desired != current) controller.trackSelectionParameters = desired
         updateSelectedQuality(selected)
     }
@@ -1503,11 +1518,8 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
     private fun playUrl(url: String?) {
         kickVideoQualities = emptyList()
         val controller = player
-        if (controller != null && controller.isCommandAvailable(Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS) &&
-            (vodSource?.isKick == true || controller.currentMediaItem?.mediaMetadata?.extras
-                ?.getBoolean(VodTimeline.EXTRA_KICK_VOD) == true)
-        ) {
-            // A saved Kick video override must never constrain a new Twitch source.
+        if (controller != null && controller.isCommandAvailable(Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS)) {
+            // Also covers navigation after the previous Kick item was cleared from the service.
             val current = controller.trackSelectionParameters
             val cleared = current.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
             if (cleared != current) controller.trackSelectionParameters = cleared

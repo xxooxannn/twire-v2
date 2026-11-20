@@ -16,6 +16,7 @@ object KickTrackSelection {
                 for (trackIndex in 0 until group.length) {
                     if (!group.isTrackSupported(trackIndex)) continue
                     val format = group.getTrackFormat(trackIndex)
+                    if ((format.roleFlags and C.ROLE_FLAG_TRICK_PLAY) != 0) continue
                     available += KickVideoTrack(
                         groupIndex, trackIndex, format.height, format.frameRate, format.bitrate
                     )

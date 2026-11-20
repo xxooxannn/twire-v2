@@ -48,7 +48,8 @@ class KickTrackSelectionTest {
         val audioOverride = TrackSelectionOverride(audio, 0)
         val fixed = TrackSelectionParameters.DEFAULT_WITHOUT_CONTEXT.buildUpon()
             .addOverride(audioOverride).addOverride(TrackSelectionOverride(video, 1)).build()
-        val auto = KickTrackSelection.parameters(fixed, tracks(), "auto")
+        // Auto can recover a stalled rendition even with no fresh track snapshot.
+        val auto = KickTrackSelection.parameters(fixed, Tracks.EMPTY, "auto")
         assertFalse(auto.overrides.containsKey(video))
         assertEquals(audioOverride, auto.overrides[audio])
     }
@@ -60,6 +61,20 @@ class KickTrackSelectionTest {
         assertEquals(listOf("720p60", "480p"), KickTrackSelection.qualities(available).map { it.label })
         val selected = KickTrackSelection.parameters(original, available, "kick:1080p60")
         assertFalse(selected.overrides.containsKey(video))
+    }
+
+    @Test
+    fun trickPlayTracksAreNotOfferedAsVideoQualities() {
+        val trickPlay = TrackGroup("thumbnails",
+            Format.Builder().setSampleMimeType(MimeTypes.VIDEO_H264)
+                .setWidth(3840).setHeight(2160).setFrameRate(60f)
+                .setRoleFlags(C.ROLE_FLAG_TRICK_PLAY).build()
+        )
+        val available = Tracks(listOf(
+            Tracks.Group(trickPlay, false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(false))
+        ) + tracks().groups)
+        assertEquals(listOf("1080p60", "720p60", "480p"),
+            KickTrackSelection.qualities(available).map { it.label })
     }
 
     @Test
