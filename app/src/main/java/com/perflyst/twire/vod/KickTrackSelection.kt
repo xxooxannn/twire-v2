@@ -14,11 +14,18 @@ object KickTrackSelection {
         tracks.groups.forEachIndexed { groupIndex, group ->
             if (group.type == C.TRACK_TYPE_VIDEO) {
                 for (trackIndex in 0 until group.length) {
-                    if (!group.isTrackSupported(trackIndex)) continue
+                    // A MIME-compatible track above the decoder's advertised size/rate limit
+                    // may still play; let the user force it instead of hiding the quality.
+                    if (!group.isTrackSupported(trackIndex, /* allowExceedsCapabilities= */ true)) continue
                     val format = group.getTrackFormat(trackIndex)
                     if ((format.roleFlags and C.ROLE_FLAG_TRICK_PLAY) != 0) continue
                     available += KickVideoTrack(
-                        groupIndex, trackIndex, format.height, format.frameRate, format.bitrate
+                        groupIndex,
+                        trackIndex,
+                        format.height,
+                        format.frameRate,
+                        format.bitrate,
+                        group.getTrackSupport(trackIndex) == C.FORMAT_EXCEEDS_CAPABILITIES
                     )
                 }
             }

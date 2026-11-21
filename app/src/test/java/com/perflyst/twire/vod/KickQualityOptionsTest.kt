@@ -49,6 +49,19 @@ class KickQualityOptionsTest {
     }
 
     @Test
+    fun retainsAboveCapabilityQualitiesAndPrefersARegularTrackForSameLabel() {
+        val qualities = KickQualityOptions.fromTracks(listOf(
+            KickVideoTrack(0, 0, 1080, 60f, 9_000_000, exceedsCapabilities = true),
+            KickVideoTrack(0, 1, 720, 60f, 3_000_000),
+            KickVideoTrack(1, 0, 1080, 60f, 8_000_000)
+        ))
+
+        assertEquals(listOf("1080p60", "720p60"), qualities.map { it.label })
+        assertEquals(1, qualities.first().groupIndex)
+        assertTrue(!qualities.first().exceedsCapabilities)
+    }
+
+    @Test
     fun excludesUnlabeledAndInvalidTrackReferences() {
         val invalidTracks = listOf(
             KickVideoTrack(0, 0, 0, 30f, 1_000_000),

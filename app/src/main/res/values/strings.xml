@@ -105,6 +105,8 @@
     <string name="kick_vod_empty">No public, completed xQc Kick recordings are available.</string>
     <string name="kick_vod_load_failed">Could not load Kick recordings. Try again from VOD source.</string>
     <string name="kick_vod_quality_auto">Auto (Kick)</string>
+    <string name="kick_vod_quality_above_device_limit">%1$s · may exceed device limit</string>
+    <string name="kick_vod_quality_warning">Trying %1$s. This resolution exceeds the device’s advertised decoder limit and may fail to play smoothly. Choose Auto or a lower quality to recover.</string>
     <string name="kick_vod_sync_help">Extra offset in seconds after automatic start-time alignment. Positive uses later Twitch messages; negative uses earlier messages. If chat appears 10 seconds late, enter 10. If it appears early, enter -10. Saved for this Twitch/Kick VOD pair.</string>
     <string name="kick_vod_sync_reset">Reset offset</string>
     <string name="kick_vod_sync_invalid">Enter a whole number between -86400 and 86400.</string>

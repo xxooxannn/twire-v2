@@ -648,7 +648,12 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
             kickVideoQualities = qualities
             val choices = linkedMapOf(GetStreamURL.QUALITY_AUTO to
                 Quality(getString(R.string.kick_vod_quality_auto), masterUrl))
-            qualities.forEach { choices[it.key] = Quality(it.label, masterUrl) }
+            qualities.forEach { quality ->
+                val label = if (quality.exceedsCapabilities) {
+                    getString(R.string.kick_vod_quality_above_device_limit, quality.label)
+                } else quality.label
+                choices[quality.key] = Quality(label, masterUrl)
+            }
             updateQualitySelections(choices)
         }
         applyKickVideoQuality()
@@ -1665,6 +1670,14 @@ class PlayerFragment : BindingFragment<FragmentStreamBinding>(FragmentStreamBind
             if (currentIsKick || quality.startsWith("kick:")) {
                 if (isPlayingKickVod() && !isAudioOnlyModeEnabled) {
                     kickVodQuality = quality
+                    val selectedQuality = kickVideoQualities.firstOrNull { it.key == quality }
+                    if (selectedQuality?.exceedsCapabilities == true) {
+                        Toast.makeText(
+                            context,
+                            getString(R.string.kick_vod_quality_warning, selectedQuality.label),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                     applyKickVideoQuality()
                     mQualityBottomSheet.dismiss()
                 }

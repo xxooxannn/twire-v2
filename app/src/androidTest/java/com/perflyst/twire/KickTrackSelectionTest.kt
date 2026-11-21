@@ -55,12 +55,14 @@ class KickTrackSelectionTest {
     }
 
     @Test
-    fun unsupportedResolutionFallsBackToAuto() {
+    fun resolutionAboveAdvertisedDeviceLimitIsAvailableAndCanBeForced() {
         val original = TrackSelectionParameters.DEFAULT_WITHOUT_CONTEXT
         val available = tracks(highestSupported = false)
-        assertEquals(listOf("720p60", "480p"), KickTrackSelection.qualities(available).map { it.label })
+        val qualities = KickTrackSelection.qualities(available)
+        assertEquals(listOf("1080p60", "720p60", "480p"), qualities.map { it.label })
+        assertEquals(true, qualities.first().exceedsCapabilities)
         val selected = KickTrackSelection.parameters(original, available, "kick:1080p60")
-        assertFalse(selected.overrides.containsKey(video))
+        assertEquals(listOf(0), selected.overrides[video]!!.trackIndices)
     }
 
     @Test

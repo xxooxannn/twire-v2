@@ -28,8 +28,11 @@ that it is falling back to Twitch. An expired playback URL can be refreshed with
 the player's Retry action. Only recording IDs are saved, never signed playback
 URLs. Open the player's quality settings to choose **Auto (Kick)** or an available
 fixed video quality such as **1080p60**, **720p60**, **480p**, **360p** or **160p**.
-The list comes from the recording's supported video tracks, so it can vary by VOD
-and device. Changing quality keeps the master playlist, audio, playback position
+The list comes from the recording's advertised video tracks; it may vary by VOD.
+Resolutions above the device's advertised decoder limit are still shown with a
+warning because Android may be able to decode them anyway. Forcing a high quality
+can instead stall or fail on some devices; switch to Auto or a lower rung if that
+happens. Changing quality keeps the master playlist, audio, playback position
 and chat timeline. The Kick quality preference is saved separately from Twitch's;
 if a saved quality is absent on a different recording, playback uses Auto.
 

@@ -7,14 +7,16 @@ data class KickVideoTrack(
     val trackIndex: Int,
     val height: Int,
     val frameRate: Float,
-    val bitrate: Int
+    val bitrate: Int,
+    val exceedsCapabilities: Boolean = false
 )
 
 data class KickVideoQuality(
     val key: String,
     val label: String,
     val groupIndex: Int,
-    val trackIndex: Int
+    val trackIndex: Int,
+    val exceedsCapabilities: Boolean = false
 )
 
 object KickQualityOptions {
@@ -23,13 +25,17 @@ object KickQualityOptions {
         .sortedWith(
             compareByDescending<KickVideoTrack> { it.height }
                 .thenByDescending { knownFrameRate(it.frameRate) }
+                // Prefer a decoder-advertised track when Kick has multiple codecs for one rung.
+                .thenBy { it.exceedsCapabilities }
                 .thenByDescending { it.bitrate.coerceAtLeast(0) }
         )
         .map { track ->
             val frameRate = knownFrameRate(track.frameRate)
             val suffix = if (frameRate >= 50f) frameRate.roundToInt().toString() else ""
             val label = "${track.height}p$suffix"
-            KickVideoQuality("kick:$label", label, track.groupIndex, track.trackIndex)
+            KickVideoQuality(
+                "kick:$label", label, track.groupIndex, track.trackIndex, track.exceedsCapabilities
+            )
         }
         .distinctBy { it.key }
 
