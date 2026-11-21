@@ -11,6 +11,7 @@ import com.perflyst.twire.R
 import com.perflyst.twire.activities.ChannelFragment.VodFragment.Companion.newInstance
 import com.perflyst.twire.databinding.ActivityVodBinding
 import com.perflyst.twire.model.VideoOnDemand
+import com.perflyst.twire.vod.VodTimeline
 
 class VODFragment : VideoFragment<ActivityVodBinding>(ActivityVodBinding::inflate) {
     private var mVod: VideoOnDemand? = null
@@ -31,6 +32,10 @@ class VODFragment : VideoFragment<ActivityVodBinding>(ActivityVodBinding::inflat
             args.putParcelable(getString(R.string.stream_fragment_streamerInfo), mVod!!.channelInfo)
             args.putString(getString(R.string.stream_fragment_vod_id), mVod!!.videoId)
             args.putString(getString(R.string.stream_fragment_title), mVod!!.videoTitle)
+            if (mVod!!.isBroadcast) {
+                args.putLong(VodTimeline.ARG_TWITCH_STARTED_AT_MS, mVod!!.broadcastStartedAtMs)
+                args.putLong(VodTimeline.ARG_TWITCH_DURATION_MS, mVod!!.length * 1000L)
+            }
             return args
         }
 

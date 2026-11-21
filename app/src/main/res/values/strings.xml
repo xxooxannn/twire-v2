@@ -91,6 +91,25 @@
     <string name="title_activity_vod">Video On Demand</string>
     <string name="intent_vod" translatable="false">intent_vod</string>
     <string name="vod_views">%,d views</string>
+    <string name="menu_vod_source">VOD source</string>
+    <string name="vod_source_title_kick">Kick video · Twitch chat</string>
+    <string name="vod_source_title_twitch">Twitch video · Twitch chat</string>
+    <string name="vod_source_twitch">Use Twitch video</string>
+    <string name="vod_source_kick_auto">Match xQc Kick VOD automatically</string>
+    <string name="vod_source_kick_choose">Choose xQc Kick VOD</string>
+    <string name="vod_source_chat_sync">Adjust Twitch chat timing</string>
+    <string name="kick_vod_playing">Playing Kick video with Twitch chat replay</string>
+    <string name="kick_vod_fallback">Kick unavailable or no clear match. Playing Twitch. Use VOD source to choose a Kick recording.</string>
+    <string name="kick_vod_no_match">No matching public xQc Kick recording found</string>
+    <string name="kick_vod_loading">Loading xQc Kick recordings…</string>
+    <string name="kick_vod_empty">No public, completed xQc Kick recordings are available.</string>
+    <string name="kick_vod_load_failed">Could not load Kick recordings. Try again from VOD source.</string>
+    <string name="kick_vod_quality_auto">Auto (Kick)</string>
+    <string name="kick_vod_quality_above_device_limit">%1$s · may exceed device limit</string>
+    <string name="kick_vod_quality_warning">Trying %1$s. This resolution exceeds the device’s advertised decoder limit and may fail to play smoothly. Choose Auto or a lower quality to recover.</string>
+    <string name="kick_vod_sync_help">Extra offset in seconds after automatic start-time alignment. Positive uses later Twitch messages; negative uses earlier messages. If chat appears 10 seconds late, enter 10. If it appears early, enter -10. Saved for this Twitch/Kick VOD pair.</string>
+    <string name="kick_vod_sync_reset">Reset offset</string>
+    <string name="kick_vod_sync_invalid">Enter a whole number between -86400 and 86400.</string>
 
     <!-- Clip activity -->
     <string name="clip_chat_expired">Chat replay is no longer available.</string>

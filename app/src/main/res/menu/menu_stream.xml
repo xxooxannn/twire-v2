@@ -37,6 +37,12 @@
         app:showAsAction="always" /-->
 
     <item
+        android:id="@+id/menu_item_vod_source"
+        android:title="@string/menu_vod_source"
+        android:visible="false"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/menu_item_external"
         android:icon="@drawable/ic_open_in_new"
         android:title="@string/menu_external"

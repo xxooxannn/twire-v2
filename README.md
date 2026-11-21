@@ -16,6 +16,7 @@ This is a fork of the [Pocket Plays for Twitch](https://github.com/SebastianRask
 
 - Built-in adblock
 - VODs with chat replay
+- xQc Kick VOD video with Twitch chat ([usage and limitations](KICK_VODS.md))
 - Custom emotes (BTTV, FFZ and 7TV)
 - Picture in Picture mode
 - Highly customizable UI
