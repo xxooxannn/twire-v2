@@ -99,8 +99,14 @@ abstract class VideoFragment<T : ViewBinding>(inflate: (LayoutInflater, ViewGrou
 
     protected fun resetStream() {
         val fm = childFragmentManager
-        mPlayerFragment = newInstance(this.streamArguments)
-        fm.beginTransaction().replace(this.videoContainerResource, mPlayerFragment).commit()
+        val args = this.streamArguments
+        mChatFragment = getInstance(args)
+        mPlayerFragment = newInstance(args)
+        // The next VOD/clip needs its own Twitch replay, not the previous video's chat.
+        fm.beginTransaction()
+            .replace(R.id.chat_fragment, mChatFragment)
+            .replace(this.videoContainerResource, mPlayerFragment, getString(R.string.stream_fragment_tag))
+            .commit()
     }
 
     open fun onBackPressed(): Boolean {

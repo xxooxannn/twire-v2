@@ -28,6 +28,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.perflyst.twire.lowlatency.LLHlsPlaylistParserFactory
 import com.perflyst.twire.service.Settings.setVodProgress
 import com.perflyst.twire.service.Settings.skipSilence
+import com.perflyst.twire.vod.VodTimeline
 
 @UnstableApi
 class PlaybackService : MediaSessionService() {
@@ -52,7 +53,7 @@ class PlaybackService : MediaSessionService() {
             ) {
                 if (oldPosition.mediaItem === newPosition.mediaItem || oldPosition.mediaItem == null || oldPosition.mediaItem!!.mediaId.isEmpty()) return
 
-                setVodProgress(oldPosition.mediaItem!!.mediaId, oldPosition.positionMs)
+                saveVodProgress(oldPosition.mediaItem!!, oldPosition.positionMs)
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -61,11 +62,18 @@ class PlaybackService : MediaSessionService() {
                     if (media.mediaId.isEmpty()) {
                         player.seekToDefaultPosition() // Go forward to live
                     } else if (!playWhenReady) {
-                        setVodProgress(media.mediaId, player.currentPosition)
+                        saveVodProgress(media, player.currentPosition)
                     }
                 }
             }
         })
+    }
+
+    private fun saveVodProgress(media: MediaItem, videoPositionMs: Long) {
+        val timeline = VodTimeline(
+            media.mediaMetadata.extras?.getLong(VodTimeline.EXTRA_VIDEO_OFFSET_MS, 0) ?: 0
+        )
+        setVodProgress(media.mediaId, timeline.twitchPosition(videoPositionMs))
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
@@ -137,6 +145,13 @@ class PlaybackService : MediaSessionService() {
                 }
             })
 
+        private val kickDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("Twire")
+            .setDefaultRequestProperties(mapOf(
+                "Referer" to "https://kick.com/",
+                "Origin" to "https://kick.com"
+            ))
+
         private val mediaSourceFactory: MediaSource.Factory = object : MediaSource.Factory {
             override fun setDrmSessionManagerProvider(drmSessionManagerProvider: DrmSessionManagerProvider): MediaSource.Factory {
                 return this
@@ -162,6 +177,11 @@ class PlaybackService : MediaSessionService() {
                 )
 
                 if (type == C.CONTENT_TYPE_HLS) {
+                    if (mediaItem.mediaMetadata.extras?.getBoolean(VodTimeline.EXTRA_KICK_VOD) == true) {
+                        // Keep Kick's manifest/segment headers and standard HLS parser separate
+                        // from Twitch's low-latency live-stream modifications.
+                        return HlsMediaSource.Factory(kickDataSourceFactory).createMediaSource(mediaItem)
+                    }
                     return HlsMediaSource.Factory(dataSourceFactory)
                         .setPlaylistParserFactory(LLHlsPlaylistParserFactory())
                         .createMediaSource(mediaItem)

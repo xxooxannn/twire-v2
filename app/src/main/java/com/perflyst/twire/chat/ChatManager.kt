@@ -107,13 +107,14 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
     }
 
     fun updateVodProgress(aCurrentProgress: Long, aSeek: Boolean) {
-        currentProgress = (aCurrentProgress / 1000f + vodOffset).toDouble()
-        seek = seek or aSeek
-
-        // Only notify the thread when there's work to do.
-        if (!aSeek && currentProgress < nextCommentOffset) return
-
         synchronized(vodLock) {
+            // A negative position suspends replay outside the Twitch/Kick overlap.
+            currentProgress = if (aCurrentProgress < 0) -1.0
+                else (aCurrentProgress / 1000.0 + vodOffset)
+            seek = seek or aSeek
+
+            // Only notify the thread when there's work to do.
+            if (!aSeek && currentProgress < nextCommentOffset) return
             (vodLock as Object).notify()
         }
     }
@@ -293,15 +294,15 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
                 onState(WebsocketConnectionState.CONNECTED)
             }
 
-            // Make sure that current progress has been set.
-            synchronized(vodLock) {
-                while (currentProgress == -1.0 && !isStopping) (vodLock as Object).wait()
-            }
-
             val downloadedComments: Queue<VODComment> = LinkedList()
             var reconnecting = false
             var justSeeked = false
             while (!isStopping) {
+                // Also wait after seeking into a Kick-only part of the recording.
+                synchronized(vodLock) {
+                    while (currentProgress < 0 && !isStopping) (vodLock as Object).wait()
+                }
+                if (isStopping) break
                 if (seek) {
                     seek = false
                     cursor = ""
@@ -320,7 +321,7 @@ class ChatManager(aChannel: UserInfo, aVodId: String?, vodOffset: Int, aCallback
                                 put("videoID", vodId)
                                 if (cursor.isEmpty()) put(
                                     "contentOffsetSeconds",
-                                    currentProgress.toInt()
+                                    currentProgress.toInt().coerceAtLeast(0)
                                 )
                                 else put("cursor", cursor)
                             }
